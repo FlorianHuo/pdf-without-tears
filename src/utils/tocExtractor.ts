@@ -42,11 +42,25 @@ async function resolveDestToPageNumber(
 
     if (!resolved || resolved.length === 0) return 1;
 
-    // First element is the page reference object
-    const ref = resolved[0];
-    const pageIndex = await pdf.getPageIndex(ref);
-    return pageIndex + 1; // Convert 0-indexed to 1-indexed
-  } catch {
+    // First element is the page reference object {num, gen}
+    const rawRef = resolved[0] as Record<string, unknown>;
+
+    // Ensure the ref has the expected shape for getPageIndex
+    // (pdf.js worker serialization may alter the object)
+    if (
+      rawRef &&
+      typeof rawRef === "object" &&
+      "num" in rawRef &&
+      "gen" in rawRef
+    ) {
+      const ref = { num: Number(rawRef.num), gen: Number(rawRef.gen) };
+      const pageIndex = await pdf.getPageIndex(ref);
+      return pageIndex + 1;
+    }
+
+    return 1;
+  } catch (err) {
+    console.error("[TOC] Failed to resolve destination:", dest, err);
     return 1;
   }
 }
