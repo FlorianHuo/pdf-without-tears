@@ -78,32 +78,37 @@ export default function PdfViewer({
     return () => ro.disconnect();
   }, []);
 
-  // Calculate visible page range from scroll position
+  // ---- Scroll tracking ----
   const [scrollTop, setScrollTop] = useState(0);
 
-  const visibleRange = useMemo(() => {
-    if (numPages === 0 || containerHeight === 0) return { start: 1, end: 1 };
+  // Track the last page set by the parent (toolbar/sidebar) so we can
+  // distinguish it from scroll-derived page changes.
+  const lastExternalPageRef = useRef(currentPage);
 
-    const rowH = pageHeight + PAGE_GAP;
-    // First visible page (0-indexed, then +1)
-    const firstVisible =
-      Math.max(0, Math.floor((scrollTop - CONTAINER_PADDING) / rowH)) + 1;
-    // Last visible page
-    const lastVisible =
-      Math.min(
-        numPages,
-        Math.ceil(
-          (scrollTop + containerHeight - CONTAINER_PADDING) / rowH,
-        ),
-      );
+  // When currentPage prop changes, record it as an external navigation
+  // and immediately scroll to that page.
+  useEffect(() => {
+    // Only act if this is a genuinely new page from the parent
+    if (currentPage === lastExternalPageRef.current) return;
+    lastExternalPageRef.current = currentPage;
 
-    return {
-      start: Math.max(1, firstVisible - OVERSCAN),
-      end: Math.min(numPages, lastVisible + OVERSCAN),
-    };
-  }, [scrollTop, numPages, pageHeight, containerHeight]);
+    const container = containerRef.current;
+    if (!container || numPages === 0) return;
 
-  // Current page derived from scroll position
+    const targetTop = getPageTop(currentPage);
+    const currentScroll = container.scrollTop;
+    const distance = Math.abs(targetTop - currentScroll);
+
+    if (distance < 5) return;
+
+    // Use instant scroll for large jumps, smooth for nearby pages
+    container.scrollTo({
+      top: targetTop - 8,
+      behavior: distance > containerHeight * 3 ? "instant" : "smooth",
+    });
+  }, [currentPage, numPages, getPageTop, containerHeight]);
+
+  // Compute which page the user is looking at based on scroll position
   const scrollDerivedPage = useMemo(() => {
     if (numPages === 0) return 1;
     const rowH = pageHeight + PAGE_GAP;
@@ -112,20 +117,21 @@ export default function PdfViewer({
     return Math.max(1, Math.min(numPages, page));
   }, [scrollTop, numPages, pageHeight, containerHeight]);
 
-  // Track when we're doing programmatic scrolling.
-  // During this window, scroll-derived page changes are NOT propagated
-  // back to the parent, preventing the feedback loop.
-  const programmaticScrollUntilRef = useRef(0);
-
-  // Propagate page change from user scroll only
+  // Propagate scroll-derived page back to parent, but only when
+  // the scroll-derived page differs from what the parent last set.
+  // This avoids the feedback loop: parent sets 200 -> we scroll -> 
+  // mid-scroll we see page 50 -> we do NOT call onPageChange(50)
+  // because lastExternalPageRef is still 200.
+  const prevScrollDerivedRef = useRef(1);
   useEffect(() => {
-    if (
-      Date.now() > programmaticScrollUntilRef.current &&
-      scrollDerivedPage !== currentPage
-    ) {
-      onPageChange(scrollDerivedPage);
-    }
-  }, [scrollDerivedPage, currentPage, onPageChange]);
+    if (scrollDerivedPage === prevScrollDerivedRef.current) return;
+    prevScrollDerivedRef.current = scrollDerivedPage;
+
+    // Update the external ref so the scroll-to-page effect
+    // won't re-fire for this same page number
+    lastExternalPageRef.current = scrollDerivedPage;
+    onPageChange(scrollDerivedPage);
+  }, [scrollDerivedPage, onPageChange]);
 
   const handleScroll = useCallback(() => {
     const container = containerRef.current;
@@ -133,36 +139,29 @@ export default function PdfViewer({
     setScrollTop(container.scrollTop);
   }, []);
 
-  // Scroll to page when currentPage changes from toolbar / sidebar
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || numPages === 0) return;
+  // ---- Visible page range (for windowed rendering) ----
+  const visibleRange = useMemo(() => {
+    if (numPages === 0 || containerHeight === 0) return { start: 1, end: 1 };
 
-    const targetTop = getPageTop(currentPage);
-    const currentScroll = container.scrollTop;
-    const distance = Math.abs(targetTop - currentScroll);
+    const rowH = pageHeight + PAGE_GAP;
+    const firstVisible =
+      Math.max(0, Math.floor((scrollTop - CONTAINER_PADDING) / rowH)) + 1;
+    const lastVisible = Math.min(
+      numPages,
+      Math.ceil((scrollTop + containerHeight - CONTAINER_PADDING) / rowH),
+    );
 
-    // Skip if already at the right position (within a small tolerance)
-    if (distance < 5) return;
-
-    // Block scroll-derived page propagation for the duration of the scroll
-    // Use instant scroll for large jumps, smooth for small ones
-    const isLargeJump = distance > containerHeight * 3;
-    programmaticScrollUntilRef.current =
-      Date.now() + (isLargeJump ? 200 : 800);
-
-    container.scrollTo({
-      top: targetTop - 8,
-      behavior: isLargeJump ? "instant" : "smooth",
-    });
-  }, [currentPage, numPages, getPageTop, containerHeight]);
+    return {
+      start: Math.max(1, firstVisible - OVERSCAN),
+      end: Math.min(numPages, lastVisible + OVERSCAN),
+    };
+  }, [scrollTop, numPages, pageHeight, containerHeight]);
 
   function onDocumentLoadSuccess({ numPages: n }: { numPages: number }) {
     setNumPages(n);
     onDocumentLoad(n);
   }
 
-  // Build list of pages to render (only the visible window)
   const pagesToRender = useMemo(() => {
     const pages: number[] = [];
     for (let i = visibleRange.start; i <= visibleRange.end; i++) {
@@ -190,7 +189,6 @@ export default function PdfViewer({
           </div>
         }
       >
-        {/* Single div as tall as all pages, holds absolutely positioned children */}
         <div className={styles.virtualList} style={{ height: totalHeight }}>
           {pagesToRender.map((pageNum) => (
             <div
