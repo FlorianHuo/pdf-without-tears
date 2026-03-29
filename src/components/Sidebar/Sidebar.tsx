@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { Document, Page } from "react-pdf";
 import styles from "./Sidebar.module.css";
 
@@ -10,8 +10,14 @@ interface SidebarProps {
   onPageChange: (page: number) => void;
 }
 
-// Only render thumbnails that are in/near the visible area
-const THUMB_BUFFER = 5;
+// Thumbnail dimensions
+const THUMB_WIDTH = 150;
+const THUMB_HEIGHT = Math.round(THUMB_WIDTH * 1.414); // A4 ratio
+const ITEM_GAP = 8; // gap between items
+const ITEM_PADDING = 8; // padding inside each button
+const LABEL_HEIGHT = 18; // height reserved for page number label
+const ITEM_HEIGHT = THUMB_HEIGHT + ITEM_PADDING * 2 + LABEL_HEIGHT + ITEM_GAP;
+const OVERSCAN = 3;
 
 export default function Sidebar({
   visible,
@@ -21,80 +27,71 @@ export default function Sidebar({
   onPageChange,
 }: SidebarProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
-  const [visibleThumbs, setVisibleThumbs] = useState<Set<number>>(
-    new Set([1, 2, 3, 4, 5]),
-  );
-  const observerRef = useRef<IntersectionObserver | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [listHeight, setListHeight] = useState(0);
 
-  // Setup IntersectionObserver for thumbnails
-  const setupObserver = useCallback(() => {
-    if (observerRef.current) observerRef.current.disconnect();
+  // Observe list container height
+  useEffect(() => {
+    const node = listRef.current;
+    if (!node || !visible) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        setListHeight(e.contentRect.height);
+      }
+    });
+    ro.observe(node);
+    setListHeight(node.clientHeight);
+    return () => ro.disconnect();
+  }, [visible]);
 
-    const list = listRef.current;
-    if (!list) return;
+  // Calculate visible thumbnail range from scroll position
+  const visibleRange = useMemo(() => {
+    if (totalPages === 0 || listHeight === 0) return { start: 1, end: 1 };
 
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        setVisibleThumbs((prev) => {
-          const next = new Set(prev);
-          for (const entry of entries) {
-            const idx = parseInt(
-              entry.target.getAttribute("data-thumb") || "0",
-            );
-            if (idx === 0) continue;
-            if (entry.isIntersecting) {
-              next.add(idx);
-            } else {
-              next.delete(idx);
-            }
-          }
-          return next;
-        });
-      },
-      {
-        root: list,
-        rootMargin: "200px 0px 200px 0px",
-        threshold: 0,
-      },
+    const firstVisible =
+      Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT)) + 1;
+    const lastVisible = Math.min(
+      totalPages,
+      Math.ceil((scrollTop + listHeight) / ITEM_HEIGHT),
     );
 
-    const items = list.querySelectorAll("[data-thumb]");
-    items.forEach((el) => observerRef.current!.observe(el));
+    return {
+      start: Math.max(1, firstVisible - OVERSCAN),
+      end: Math.min(totalPages, lastVisible + OVERSCAN),
+    };
+  }, [scrollTop, totalPages, listHeight]);
+
+  const handleScroll = useCallback(() => {
+    const node = listRef.current;
+    if (node) setScrollTop(node.scrollTop);
   }, []);
 
-  // Re-observe when totalPages changes
+  // Auto-scroll sidebar to keep current page visible
   useEffect(() => {
-    if (totalPages > 0 && visible) {
-      requestAnimationFrame(() => setupObserver());
-    }
-    return () => {
-      if (observerRef.current) observerRef.current.disconnect();
-    };
-  }, [totalPages, visible, setupObserver]);
+    const node = listRef.current;
+    if (!node || !visible || totalPages === 0) return;
 
-  // Auto-scroll the sidebar to keep the current page thumbnail visible
-  useEffect(() => {
-    if (!visible || !listRef.current) return;
+    const itemTop = (currentPage - 1) * ITEM_HEIGHT;
+    const itemBottom = itemTop + ITEM_HEIGHT;
 
-    const activeThumb = listRef.current.querySelector(
-      `[data-thumb="${currentPage}"]`,
-    );
-    if (activeThumb) {
-      activeThumb.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (itemTop < node.scrollTop || itemBottom > node.scrollTop + listHeight) {
+      node.scrollTo({
+        top: itemTop - listHeight / 2 + ITEM_HEIGHT / 2,
+        behavior: "smooth",
+      });
     }
-  }, [currentPage, visible]);
+  }, [currentPage, visible, totalPages, listHeight]);
 
-  // Determine which thumbnails to actually render
-  const renderedThumbs = new Set<number>();
-  for (const p of visibleThumbs) {
-    for (
-      let i = Math.max(1, p - THUMB_BUFFER);
-      i <= Math.min(totalPages, p + THUMB_BUFFER);
-      i++
-    ) {
-      renderedThumbs.add(i);
+  // Build the list of thumbnails to render
+  const thumbsToRender = useMemo(() => {
+    const items: number[] = [];
+    for (let i = visibleRange.start; i <= visibleRange.end; i++) {
+      items.push(i);
     }
-  }
+    return items;
+  }, [visibleRange]);
+
+  const totalListHeight = totalPages * ITEM_HEIGHT;
 
   if (!visible) return null;
 
@@ -107,14 +104,18 @@ export default function Sidebar({
         )}
       </div>
 
-      <div className={styles.thumbnailList} ref={listRef}>
+      <div
+        className={styles.thumbnailList}
+        ref={listRef}
+        onScroll={handleScroll}
+      >
         {fileUrl && totalPages > 0 && (
           <Document file={fileUrl} loading={null}>
-            {Array.from(new Array(totalPages), (_, index) => {
-              const pageNum = index + 1;
-              const shouldRender = renderedThumbs.has(pageNum);
-
-              return (
+            <div
+              className={styles.virtualList}
+              style={{ height: totalListHeight }}
+            >
+              {thumbsToRender.map((pageNum) => (
                 <button
                   key={`thumb_${pageNum}`}
                   className={`${styles.thumbnailItem} ${
@@ -122,29 +123,30 @@ export default function Sidebar({
                   }`}
                   onClick={() => onPageChange(pageNum)}
                   aria-label={`Go to page ${pageNum}`}
-                  data-thumb={pageNum}
+                  style={{
+                    position: "absolute",
+                    top: (pageNum - 1) * ITEM_HEIGHT,
+                    left: 0,
+                    right: 0,
+                  }}
                 >
                   <div className={styles.thumbnailCanvas}>
-                    {shouldRender ? (
-                      <Page
-                        pageNumber={pageNum}
-                        width={150}
-                        renderTextLayer={false}
-                        renderAnnotationLayer={false}
-                        loading={
-                          <div className={styles.thumbPlaceholder}>
-                            {pageNum}
-                          </div>
-                        }
-                      />
-                    ) : (
-                      <div className={styles.thumbPlaceholder}>{pageNum}</div>
-                    )}
+                    <Page
+                      pageNumber={pageNum}
+                      width={THUMB_WIDTH}
+                      renderTextLayer={false}
+                      renderAnnotationLayer={false}
+                      loading={
+                        <div className={styles.thumbPlaceholder}>
+                          {pageNum}
+                        </div>
+                      }
+                    />
                   </div>
                   <span className={styles.thumbnailLabel}>{pageNum}</span>
                 </button>
-              );
-            })}
+              ))}
+            </div>
           </Document>
         )}
       </div>

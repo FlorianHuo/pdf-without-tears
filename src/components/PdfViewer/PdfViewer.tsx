@@ -18,8 +18,12 @@ interface PdfViewerProps {
   onPageChange: (page: number) => void;
 }
 
-// Number of off-screen pages to keep rendered above/below the viewport
-const BUFFER_PAGES = 3;
+// How many pages to render above/below the viewport
+const OVERSCAN = 2;
+// Gap between pages in px
+const PAGE_GAP = 16;
+// Padding top/bottom of the scroll container
+const CONTAINER_PADDING = 24;
 
 export default function PdfViewer({
   fileUrl,
@@ -28,185 +32,135 @@ export default function PdfViewer({
   onDocumentLoad,
   onPageChange,
 }: PdfViewerProps) {
-  const [numPages, setNumPages] = useState<number>(0);
-  const [containerWidth, setContainerWidth] = useState<number>(0);
-  const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set([1]));
-  const containerNodeRef = useRef<HTMLDivElement | null>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  // Ref to prevent scroll-to-page from triggering onPageChange feedback loop
-  const isScrollingToPageRef = useRef(false);
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [numPages, setNumPages] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isUserScrollRef = useRef(true);
 
-  // Estimated page height for placeholders (A4 aspect ratio = 1:1.414)
-  const pageHeight = useMemo(() => {
-    const pw = Math.max(200, (containerWidth - 80) * zoom);
-    return pw * 1.414;
-  }, [containerWidth, zoom]);
+  // Page dimensions: use A4 aspect ratio as estimate
+  const pageWidth = useMemo(
+    () => Math.max(200, (containerWidth - 80) * zoom),
+    [containerWidth, zoom],
+  );
+  const pageHeight = useMemo(() => pageWidth * 1.414, [pageWidth]);
 
-  const pageWidth = useMemo(() => {
-    return Math.max(200, (containerWidth - 80) * zoom);
-  }, [containerWidth, zoom]);
-
-  // Track which pages are visible using IntersectionObserver
-  // We expand the rootMargin so pages slightly off-screen are pre-rendered
-  const setupObserver = useCallback(() => {
-    if (observerRef.current) {
-      observerRef.current.disconnect();
-    }
-
-    const container = containerNodeRef.current;
-    if (!container) return;
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        setVisiblePages((prev) => {
-          const next = new Set(prev);
-          for (const entry of entries) {
-            const pageNum = parseInt(
-              entry.target.getAttribute("data-page-number") || "0",
-            );
-            if (pageNum === 0) continue;
-            if (entry.isIntersecting) {
-              next.add(pageNum);
-            } else {
-              next.delete(pageNum);
-            }
-          }
-          return next;
-        });
-      },
-      {
-        root: container,
-        // Pre-render pages 1 full viewport above and below
-        rootMargin: "100% 0px 100% 0px",
-        threshold: 0,
-      },
-    );
-
-    // Observe all page wrappers
-    const wrappers = container.querySelectorAll("[data-page-number]");
-    wrappers.forEach((el) => observerRef.current!.observe(el));
-  }, []);
-
-  // ContainerRef callback: measure width + setup observer
-  const setContainerRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      containerNodeRef.current = node;
-      if (node) {
-        const resizeObserver = new ResizeObserver((entries) => {
-          for (const entry of entries) {
-            setContainerWidth(entry.contentRect.width);
-          }
-        });
-        resizeObserver.observe(node);
-        setContainerWidth(node.clientWidth);
-      }
-    },
-    [],
+  // Total scrollable height
+  const totalHeight = useMemo(
+    () =>
+      numPages > 0
+        ? numPages * pageHeight +
+          (numPages - 1) * PAGE_GAP +
+          CONTAINER_PADDING * 2
+        : 0,
+    [numPages, pageHeight],
   );
 
-  // Re-setup IntersectionObserver whenever numPages changes
+  // Given a page number (1-indexed), return its top offset
+  const getPageTop = useCallback(
+    (page: number) =>
+      CONTAINER_PADDING + (page - 1) * (pageHeight + PAGE_GAP),
+    [pageHeight],
+  );
+
+  // Observe container dimensions
   useEffect(() => {
-    if (numPages > 0) {
-      // Give DOM a tick to render the placeholder divs
-      requestAnimationFrame(() => setupObserver());
-    }
-    return () => {
-      if (observerRef.current) observerRef.current.disconnect();
+    const node = containerRef.current;
+    if (!node) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        setContainerWidth(e.contentRect.width);
+        setContainerHeight(e.contentRect.height);
+      }
+    });
+    ro.observe(node);
+    setContainerWidth(node.clientWidth);
+    setContainerHeight(node.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+
+  // Calculate visible page range from scroll position
+  const [scrollTop, setScrollTop] = useState(0);
+
+  const visibleRange = useMemo(() => {
+    if (numPages === 0 || containerHeight === 0) return { start: 1, end: 1 };
+
+    const rowH = pageHeight + PAGE_GAP;
+    // First visible page (0-indexed, then +1)
+    const firstVisible =
+      Math.max(0, Math.floor((scrollTop - CONTAINER_PADDING) / rowH)) + 1;
+    // Last visible page
+    const lastVisible =
+      Math.min(
+        numPages,
+        Math.ceil(
+          (scrollTop + containerHeight - CONTAINER_PADDING) / rowH,
+        ),
+      );
+
+    return {
+      start: Math.max(1, firstVisible - OVERSCAN),
+      end: Math.min(numPages, lastVisible + OVERSCAN),
     };
-  }, [numPages, setupObserver]);
+  }, [scrollTop, numPages, pageHeight, containerHeight]);
+
+  // Current page derived from scroll position
+  const scrollDerivedPage = useMemo(() => {
+    if (numPages === 0) return 1;
+    const rowH = pageHeight + PAGE_GAP;
+    // Page whose top is closest to 30% of viewport
+    const targetY = scrollTop + containerHeight * 0.3;
+    const page = Math.round((targetY - CONTAINER_PADDING) / rowH) + 1;
+    return Math.max(1, Math.min(numPages, page));
+  }, [scrollTop, numPages, pageHeight, containerHeight]);
+
+  // Propagate page change from scroll
+  useEffect(() => {
+    if (isUserScrollRef.current && scrollDerivedPage !== currentPage) {
+      onPageChange(scrollDerivedPage);
+    }
+  }, [scrollDerivedPage, currentPage, onPageChange]);
+
+  const handleScroll = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    isUserScrollRef.current = true;
+    setScrollTop(container.scrollTop);
+  }, []);
+
+  // Scroll to page when currentPage changes from toolbar / sidebar
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || numPages === 0) return;
+
+    const targetTop = getPageTop(currentPage);
+    const currentScroll = container.scrollTop;
+
+    // Only scroll if the target page isn't already in view
+    if (Math.abs(targetTop - currentScroll) > containerHeight * 0.3) {
+      isUserScrollRef.current = false;
+      container.scrollTo({ top: targetTop - 8, behavior: "smooth" });
+    }
+  }, [currentPage, numPages, getPageTop, containerHeight]);
 
   function onDocumentLoadSuccess({ numPages: n }: { numPages: number }) {
     setNumPages(n);
-    setVisiblePages(new Set([1, 2, 3]));
     onDocumentLoad(n);
   }
 
-  // Determine which pages should be rendered (visible + buffer)
-  const renderedPages = useMemo(() => {
-    const result = new Set<number>();
-    for (const p of visiblePages) {
-      for (
-        let i = Math.max(1, p - BUFFER_PAGES);
-        i <= Math.min(numPages, p + BUFFER_PAGES);
-        i++
-      ) {
-        result.add(i);
-      }
+  // Build list of pages to render (only the visible window)
+  const pagesToRender = useMemo(() => {
+    const pages: number[] = [];
+    for (let i = visibleRange.start; i <= visibleRange.end; i++) {
+      pages.push(i);
     }
-    return result;
-  }, [visiblePages, numPages]);
-
-  // Track current page based on scroll position (throttled)
-  const handleScroll = useCallback(
-    (e: React.UIEvent<HTMLDivElement>) => {
-      // Skip if we're programmatically scrolling to a page
-      if (isScrollingToPageRef.current) return;
-
-      const container = e.currentTarget;
-      const containerRect = container.getBoundingClientRect();
-      // The "current page" is the one whose top edge is closest to 30% from top
-      const targetY = containerRect.top + containerRect.height * 0.3;
-
-      const wrappers = container.querySelectorAll("[data-page-number]");
-      let closestPage = currentPage;
-      let closestDist = Infinity;
-
-      for (const el of wrappers) {
-        const rect = el.getBoundingClientRect();
-        const dist = Math.abs(rect.top - targetY);
-        if (dist < closestDist) {
-          closestDist = dist;
-          closestPage = parseInt(
-            el.getAttribute("data-page-number") || "1",
-          );
-        }
-      }
-
-      if (closestPage !== currentPage) {
-        onPageChange(closestPage);
-      }
-    },
-    [currentPage, onPageChange],
-  );
-
-  // Scroll to page when currentPage changes from toolbar/sidebar
-  useEffect(() => {
-    const container = containerNodeRef.current;
-    if (!container || numPages === 0) return;
-
-    const pageEl = container.querySelector(
-      `[data-page-number="${currentPage}"]`,
-    );
-    if (!pageEl) return;
-
-    // Check if the page is already reasonably in view
-    const containerRect = container.getBoundingClientRect();
-    const pageRect = pageEl.getBoundingClientRect();
-    const isInView =
-      pageRect.top >= containerRect.top - 50 &&
-      pageRect.top <= containerRect.top + containerRect.height * 0.5;
-
-    if (!isInView) {
-      isScrollingToPageRef.current = true;
-      pageEl.scrollIntoView({ behavior: "smooth", block: "start" });
-
-      // Release the scroll lock after the smooth scroll finishes
-      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-      scrollTimeoutRef.current = setTimeout(() => {
-        isScrollingToPageRef.current = false;
-      }, 500);
-    }
-  }, [currentPage, numPages]);
+    return pages;
+  }, [visibleRange]);
 
   if (!fileUrl) return null;
 
   return (
-    <div
-      className={styles.container}
-      ref={setContainerRef}
-      onScroll={handleScroll}
-    >
+    <div className={styles.container} ref={containerRef} onScroll={handleScroll}>
       <Document
         file={fileUrl}
         onLoadSuccess={onDocumentLoadSuccess}
@@ -222,48 +176,37 @@ export default function PdfViewer({
           </div>
         }
       >
-        {Array.from(new Array(numPages), (_, index) => {
-          const pageNum = index + 1;
-          const shouldRender = renderedPages.has(pageNum);
-
-          return (
+        {/* Single div as tall as all pages, holds absolutely positioned children */}
+        <div className={styles.virtualList} style={{ height: totalHeight }}>
+          {pagesToRender.map((pageNum) => (
             <div
               key={`page_${pageNum}`}
               className={styles.pageWrapper}
               data-page-number={pageNum}
               style={{
-                // Use min-height so the wrapper keeps its space
-                // even when the page is not rendered
-                minHeight: shouldRender ? undefined : pageHeight,
+                position: "absolute",
+                top: getPageTop(pageNum),
+                left: "50%",
+                transform: "translateX(-50%)",
               }}
             >
-              {shouldRender ? (
-                <Page
-                  pageNumber={pageNum}
-                  width={pageWidth}
-                  renderTextLayer={true}
-                  renderAnnotationLayer={true}
-                  loading={
-                    <div
-                      className={styles.pagePlaceholder}
-                      style={{
-                        width: pageWidth,
-                        height: pageHeight,
-                      }}
-                    />
-                  }
-                />
-              ) : (
-                <div
-                  className={styles.pagePlaceholder}
-                  style={{ width: pageWidth, height: pageHeight }}
-                >
-                  <span className={styles.placeholderLabel}>{pageNum}</span>
-                </div>
-              )}
+              <Page
+                pageNumber={pageNum}
+                width={pageWidth}
+                renderTextLayer={true}
+                renderAnnotationLayer={true}
+                loading={
+                  <div
+                    className={styles.pagePlaceholder}
+                    style={{ width: pageWidth, height: pageHeight }}
+                  >
+                    <span className={styles.placeholderLabel}>{pageNum}</span>
+                  </div>
+                }
+              />
             </div>
-          );
-        })}
+          ))}
+        </div>
       </Document>
     </div>
   );
