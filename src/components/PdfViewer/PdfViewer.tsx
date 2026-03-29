@@ -36,7 +36,6 @@ export default function PdfViewer({
   const [containerWidth, setContainerWidth] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const isUserScrollRef = useRef(true);
 
   // Page dimensions: use A4 aspect ratio as estimate
   const pageWidth = useMemo(
@@ -108,15 +107,22 @@ export default function PdfViewer({
   const scrollDerivedPage = useMemo(() => {
     if (numPages === 0) return 1;
     const rowH = pageHeight + PAGE_GAP;
-    // Page whose top is closest to 30% of viewport
     const targetY = scrollTop + containerHeight * 0.3;
     const page = Math.round((targetY - CONTAINER_PADDING) / rowH) + 1;
     return Math.max(1, Math.min(numPages, page));
   }, [scrollTop, numPages, pageHeight, containerHeight]);
 
-  // Propagate page change from scroll
+  // Track when we're doing programmatic scrolling.
+  // During this window, scroll-derived page changes are NOT propagated
+  // back to the parent, preventing the feedback loop.
+  const programmaticScrollUntilRef = useRef(0);
+
+  // Propagate page change from user scroll only
   useEffect(() => {
-    if (isUserScrollRef.current && scrollDerivedPage !== currentPage) {
+    if (
+      Date.now() > programmaticScrollUntilRef.current &&
+      scrollDerivedPage !== currentPage
+    ) {
       onPageChange(scrollDerivedPage);
     }
   }, [scrollDerivedPage, currentPage, onPageChange]);
@@ -124,7 +130,6 @@ export default function PdfViewer({
   const handleScroll = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
-    isUserScrollRef.current = true;
     setScrollTop(container.scrollTop);
   }, []);
 
@@ -135,12 +140,21 @@ export default function PdfViewer({
 
     const targetTop = getPageTop(currentPage);
     const currentScroll = container.scrollTop;
+    const distance = Math.abs(targetTop - currentScroll);
 
-    // Only scroll if the target page isn't already in view
-    if (Math.abs(targetTop - currentScroll) > containerHeight * 0.3) {
-      isUserScrollRef.current = false;
-      container.scrollTo({ top: targetTop - 8, behavior: "smooth" });
-    }
+    // Skip if already at the right position (within a small tolerance)
+    if (distance < 5) return;
+
+    // Block scroll-derived page propagation for the duration of the scroll
+    // Use instant scroll for large jumps, smooth for small ones
+    const isLargeJump = distance > containerHeight * 3;
+    programmaticScrollUntilRef.current =
+      Date.now() + (isLargeJump ? 200 : 800);
+
+    container.scrollTo({
+      top: targetTop - 8,
+      behavior: isLargeJump ? "instant" : "smooth",
+    });
   }, [currentPage, numPages, getPageTop, containerHeight]);
 
   function onDocumentLoadSuccess({ numPages: n }: { numPages: number }) {
