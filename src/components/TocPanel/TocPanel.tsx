@@ -43,7 +43,7 @@ export default function TocPanel({
       const newItem: TocItem = {
         id: generateTocId(),
         title: "New Entry",
-        pageNumber: 1,
+        pageNumber: currentPage,
         depth,
         children: [],
       };
@@ -51,7 +51,7 @@ export default function TocPanel({
       // Start editing the new item immediately
       setEditingId(newItem.id);
     },
-    [items, onUpdate],
+    [items, onUpdate, currentPage],
   );
 
   const handleAddChild = useCallback(
@@ -59,14 +59,14 @@ export default function TocPanel({
       const newItem: TocItem = {
         id: generateTocId(),
         title: "New Entry",
-        pageNumber: 1,
+        pageNumber: currentPage,
         depth: depth + 1,
         children: [],
       };
       onUpdate(addChildInTree(items, id, newItem));
       setEditingId(newItem.id);
     },
-    [items, onUpdate],
+    [items, onUpdate, currentPage],
   );
 
   const handlePageNumberChange = useCallback(
@@ -108,13 +108,13 @@ export default function TocPanel({
     const newItem: TocItem = {
       id: generateTocId(),
       title: "New Chapter",
-      pageNumber: 1,
+      pageNumber: currentPage,
       depth: 0,
       children: [],
     };
     onUpdate([...items, newItem]);
     setEditingId(newItem.id);
-  }, [items, onUpdate]);
+  }, [items, onUpdate, currentPage]);
 
   if (items.length === 0) {
     return (

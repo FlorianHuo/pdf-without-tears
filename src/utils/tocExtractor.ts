@@ -32,7 +32,6 @@ async function resolveDestToPageNumber(
 
     let resolved: unknown[] | null;
     if (typeof dest === "string") {
-      // Named destination - resolve it first
       resolved = await pdf.getDestination(dest);
     } else if (Array.isArray(dest)) {
       resolved = dest;
@@ -46,7 +45,7 @@ async function resolveDestToPageNumber(
     const rawRef = resolved[0] as Record<string, unknown>;
 
     // Ensure the ref has the expected shape for getPageIndex
-    // (pdf.js worker serialization may alter the object)
+    // (pdf.js worker serialization may alter the object prototype)
     if (
       rawRef &&
       typeof rawRef === "object" &&
@@ -59,8 +58,7 @@ async function resolveDestToPageNumber(
     }
 
     return 1;
-  } catch (err) {
-    console.error("[TOC] Failed to resolve destination:", dest, err);
+  } catch {
     return 1;
   }
 }
@@ -88,7 +86,7 @@ async function convertOutlineItems(
       pageNumber,
       depth,
       children,
-      collapsed: depth >= 2, // Auto-collapse deep nesting
+      collapsed: depth >= 2,
     });
   }
 
@@ -106,3 +104,4 @@ export async function extractOutline(
   if (!outline || outline.length === 0) return [];
   return convertOutlineItems(pdf, outline as PdfJsOutlineItem[], 0);
 }
+
