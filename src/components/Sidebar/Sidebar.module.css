@@ -92,7 +92,7 @@
 
 .thumbPlaceholder {
   width: 150px;
-  height: 212px; /* 150 * 1.414 for A4 aspect ratio */
+  height: 233px; /* 150 * 1.55 for generous page ratio */
   background-color: var(--color-bg-tertiary);
   display: flex;
   align-items: center;

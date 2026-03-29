@@ -12,7 +12,7 @@ interface SidebarProps {
 
 // Thumbnail dimensions
 const THUMB_WIDTH = 150;
-const THUMB_HEIGHT = Math.round(THUMB_WIDTH * 1.414); // A4 ratio
+const THUMB_HEIGHT = Math.round(THUMB_WIDTH * 1.55); // generous ratio for various page sizes
 const ITEM_GAP = 8; // gap between items
 const ITEM_PADDING = 8; // padding inside each button
 const LABEL_HEIGHT = 18; // height reserved for page number label
