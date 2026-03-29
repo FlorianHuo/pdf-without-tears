@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import { extractOutline } from "../../utils/tocExtractor";
+import type { TocItem } from "../../types/toc";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import styles from "./PdfViewer.module.css";
@@ -16,6 +18,7 @@ interface PdfViewerProps {
   zoom: number;
   onDocumentLoad: (numPages: number) => void;
   onPageChange: (page: number) => void;
+  onOutlineLoad: (items: TocItem[]) => void;
 }
 
 // How many pages to render above/below the viewport
@@ -31,6 +34,7 @@ export default function PdfViewer({
   zoom,
   onDocumentLoad,
   onPageChange,
+  onOutlineLoad,
 }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -157,9 +161,20 @@ export default function PdfViewer({
     };
   }, [scrollTop, numPages, pageHeight, containerHeight]);
 
-  function onDocumentLoadSuccess({ numPages: n }: { numPages: number }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function onDocumentLoadSuccess(pdf: any) {
+    const n = pdf.numPages;
     setNumPages(n);
     onDocumentLoad(n);
+
+    // Extract outline (TOC) from the loaded document
+    try {
+      const outline = await extractOutline(pdf);
+      onOutlineLoad(outline);
+    } catch (err) {
+      console.error("Failed to extract outline:", err);
+      onOutlineLoad([]);
+    }
   }
 
   const pagesToRender = useMemo(() => {

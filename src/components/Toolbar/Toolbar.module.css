@@ -105,3 +105,17 @@
   background-color: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
+
+.saveButton {
+  color: var(--color-accent);
+}
+
+.saveButton:hover:not(:disabled) {
+  color: var(--color-accent);
+  background-color: var(--color-accent-subtle);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

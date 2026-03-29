@@ -1,17 +1,18 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { readFile } from "@tauri-apps/plugin-fs";
+import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import Toolbar from "./components/Toolbar/Toolbar";
 import Sidebar from "./components/Sidebar/Sidebar";
 import PdfViewer from "./components/PdfViewer/PdfViewer";
 import StatusBar from "./components/StatusBar/StatusBar";
 import WelcomeScreen from "./components/WelcomeScreen/WelcomeScreen";
+import { writeTocToPdf } from "./utils/tocWriter";
+import type { TocItem } from "./types/toc";
 import styles from "./App.module.css";
 
 function App() {
   // --- Theme State ---
   const [isDark, setIsDark] = useState(() => {
-    // Default to system preference
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
 
@@ -28,6 +29,14 @@ function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [zoom, setZoom] = useState(1.0);
+
+  // --- TOC State ---
+  const [tocItems, setTocItems] = useState<TocItem[]>([]);
+  const [tocModified, setTocModified] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Keep the file path for saving back
+  const filePathRef = useRef<string | null>(null);
 
   // --- UI State ---
   const [sidebarVisible, setSidebarVisible] = useState(true);
@@ -65,11 +74,14 @@ function App() {
         URL.revokeObjectURL(fileUrl);
       }
 
+      filePathRef.current = filePath;
       setFileUrl(blobUrl);
       setFileName(filePath.split("/").pop() || "document.pdf");
       setCurrentPage(1);
       setTotalPages(0);
       setZoom(1.0);
+      setTocItems([]);
+      setTocModified(false);
     } catch (err) {
       console.error("Failed to read PDF file:", err);
     }
@@ -79,6 +91,47 @@ function App() {
   const handleDocumentLoad = useCallback((numPages: number) => {
     setTotalPages(numPages);
   }, []);
+
+  // --- Outline Load Handler ---
+  const handleOutlineLoad = useCallback((items: TocItem[]) => {
+    setTocItems(items);
+    setTocModified(false);
+  }, []);
+
+  // --- TOC Update Handler ---
+  const handleTocUpdate = useCallback((items: TocItem[]) => {
+    setTocItems(items);
+    setTocModified(true);
+  }, []);
+
+  // --- Save TOC to PDF ---
+  const handleSaveToc = useCallback(async () => {
+    const filePath = filePathRef.current;
+    if (!filePath || tocItems.length === 0 || isSaving) return;
+
+    setIsSaving(true);
+    try {
+      // Read the original PDF bytes
+      const originalBytes = await readFile(filePath);
+
+      // Inject the new outline
+      const modifiedBytes = await writeTocToPdf(
+        new Uint8Array(originalBytes),
+        tocItems,
+      );
+
+      // Overwrite the original file
+      await writeFile(filePath, modifiedBytes);
+
+      setTocModified(false);
+      console.log("TOC saved successfully to", filePath);
+    } catch (err) {
+      console.error("Failed to save TOC:", err);
+      // TODO: Show user-facing error notification
+    } finally {
+      setIsSaving(false);
+    }
+  }, [tocItems, isSaving]);
 
   // --- Drag & Drop Handlers ---
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -102,19 +155,20 @@ function App() {
     if (files.length > 0) {
       const file = files[0];
       if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
-        // In Tauri, we get the file path from the drop event
         const filePath = (file as any).path;
         if (filePath) {
           await loadPdfFile(filePath);
         } else {
-          // Fallback: read from the File object directly
           const blobUrl = URL.createObjectURL(file);
           if (fileUrl) URL.revokeObjectURL(fileUrl);
+          filePathRef.current = null;
           setFileUrl(blobUrl);
           setFileName(file.name);
           setCurrentPage(1);
           setTotalPages(0);
           setZoom(1.0);
+          setTocItems([]);
+          setTocModified(false);
         }
       }
     }
@@ -131,10 +185,17 @@ function App() {
         handleOpenFile();
       }
 
+      // Cmd+S: Save TOC
+      if (isMod && e.key === "s") {
+        e.preventDefault();
+        if (tocModified) {
+          handleSaveToc();
+        }
+      }
+
       // Navigate pages
       if (!isMod && fileUrl) {
         if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-          // Don't intercept if user is typing in an input
           if ((e.target as HTMLElement).tagName === "INPUT") return;
           e.preventDefault();
           setCurrentPage((p) => Math.max(1, p - 1));
@@ -162,7 +223,7 @@ function App() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleOpenFile, fileUrl, totalPages]);
+  }, [handleOpenFile, handleSaveToc, fileUrl, totalPages, tocModified]);
 
   const hasDocument = fileUrl !== null;
 
@@ -185,6 +246,9 @@ function App() {
         onToggleSidebar={() => setSidebarVisible(!sidebarVisible)}
         onToggleTheme={() => setIsDark(!isDark)}
         isDark={isDark}
+        tocModified={tocModified}
+        isSaving={isSaving}
+        onSaveToc={handleSaveToc}
       />
 
       <div className={styles.workspace}>
@@ -194,7 +258,9 @@ function App() {
             fileUrl={fileUrl}
             totalPages={totalPages}
             currentPage={currentPage}
+            tocItems={tocItems}
             onPageChange={setCurrentPage}
+            onTocUpdate={handleTocUpdate}
           />
         )}
 
@@ -206,6 +272,7 @@ function App() {
               zoom={zoom}
               onDocumentLoad={handleDocumentLoad}
               onPageChange={setCurrentPage}
+              onOutlineLoad={handleOutlineLoad}
             />
           ) : (
             <WelcomeScreen

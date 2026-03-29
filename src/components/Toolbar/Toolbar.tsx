@@ -12,6 +12,9 @@ interface ToolbarProps {
   onToggleSidebar: () => void;
   onToggleTheme: () => void;
   isDark: boolean;
+  tocModified?: boolean;
+  isSaving?: boolean;
+  onSaveToc?: () => void;
 }
 
 // Zoom presets
@@ -31,6 +34,9 @@ export default function Toolbar({
   onToggleSidebar,
   onToggleTheme,
   isDark,
+  tocModified,
+  isSaving,
+  onSaveToc,
 }: ToolbarProps) {
   const handlePageInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -79,6 +85,19 @@ export default function Toolbar({
         >
           <FolderIcon />
         </button>
+
+        {/* Save TOC button */}
+        {tocModified && (
+          <button
+            className={`${styles.iconButton} ${styles.saveButton}`}
+            onClick={onSaveToc}
+            disabled={isSaving}
+            title="Save outline to PDF (Cmd+S)"
+            aria-label="Save outline"
+          >
+            {isSaving ? <SpinnerSmall /> : <SaveIcon />}
+          </button>
+        )}
       </div>
 
       {/* Center section - Navigation */}
@@ -244,6 +263,24 @@ function MoonIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M13.5 8.5a5.5 5.5 0 01-7-7 5.5 5.5 0 107 7z" />
+    </svg>
+  );
+}
+
+function SaveIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M13 14H3a1 1 0 01-1-1V3a1 1 0 011-1h8l3 3v9a1 1 0 01-1 1z" />
+      <polyline points="10,2 10,6 5,6 5,2" />
+      <rect x="5" y="9" width="6" height="3" />
+    </svg>
+  );
+}
+
+function SpinnerSmall() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+      <path d="M8 2a6 6 0 016 6" />
     </svg>
   );
 }
