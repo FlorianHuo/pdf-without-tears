@@ -1,0 +1,21 @@
+[package]
+name = "pdf-without-tears"
+version = "0.1.0"
+description = "A personal PDF ebook processing toolkit"
+authors = ["florian"]
+edition = "2021"
+
+[lib]
+name = "pdf_without_tears_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
