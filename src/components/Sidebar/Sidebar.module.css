@@ -94,3 +94,15 @@
   color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
 }
+
+.thumbPlaceholder {
+  width: 150px;
+  height: 212px; /* 150 * 1.414 for A4 aspect ratio */
+  background-color: var(--color-bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  opacity: 0.6;
+}

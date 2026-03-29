@@ -36,7 +36,16 @@
 .pagePlaceholder {
   background-color: var(--color-bg-tertiary);
   border-radius: var(--radius-sm);
-  animation: pulse 1.5s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.placeholderLabel {
+  font-size: var(--font-size-lg);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.5;
 }
 
 @keyframes pulse {
