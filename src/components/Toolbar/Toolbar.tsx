@@ -1,20 +1,24 @@
+import type { ZoomMode } from "../PdfViewer/PdfViewer";
 import styles from "./Toolbar.module.css";
 
 interface ToolbarProps {
   currentPage: number;
   totalPages: number;
   zoom: number;
+  zoomMode: ZoomMode;
   hasDocument: boolean;
   sidebarVisible: boolean;
   onOpenFile: () => void;
   onPageChange: (page: number) => void;
   onZoomChange: (zoom: number) => void;
+  onZoomModeChange: (mode: ZoomMode) => void;
   onToggleSidebar: () => void;
   onToggleTheme: () => void;
   isDark: boolean;
   tocModified?: boolean;
   isSaving?: boolean;
   onSaveToc?: () => void;
+  onOpenSettings?: () => void;
 }
 
 // Zoom presets
@@ -26,17 +30,20 @@ export default function Toolbar({
   currentPage,
   totalPages,
   zoom,
+  zoomMode,
   hasDocument,
   sidebarVisible,
   onOpenFile,
   onPageChange,
   onZoomChange,
+  onZoomModeChange,
   onToggleSidebar,
   onToggleTheme,
   isDark,
   tocModified,
   isSaving,
   onSaveToc,
+  onOpenSettings,
 }: ToolbarProps) {
   const handlePageInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -51,15 +58,13 @@ export default function Toolbar({
   };
 
   const handleZoomIn = () => {
+    onZoomModeChange("custom");
     onZoomChange(Math.min(ZOOM_MAX, zoom + ZOOM_STEP));
   };
 
   const handleZoomOut = () => {
+    onZoomModeChange("custom");
     onZoomChange(Math.max(ZOOM_MIN, zoom - ZOOM_STEP));
-  };
-
-  const handleFitWidth = () => {
-    onZoomChange(1.0);
   };
 
   return (
@@ -146,7 +151,7 @@ export default function Toolbar({
             <button
               className={styles.iconButton}
               onClick={handleZoomOut}
-              disabled={zoom <= ZOOM_MIN}
+              disabled={zoomMode !== "custom" || zoom <= ZOOM_MIN}
               title="Zoom out"
               aria-label="Zoom out"
             >
@@ -154,18 +159,27 @@ export default function Toolbar({
             </button>
 
             <button
-              className={styles.zoomButton}
-              onClick={handleFitWidth}
-              title="Reset zoom to fit width"
-              aria-label="Zoom level"
+              className={`${styles.zoomButton} ${zoomMode === "fit-width" ? styles.zoomActive : ""}`}
+              onClick={() => onZoomModeChange(zoomMode === "fit-width" ? "custom" : "fit-width")}
+              title="Fit width"
+              aria-label="Fit width"
             >
-              {Math.round(zoom * 100)}%
+              <FitWidthIcon />
+            </button>
+
+            <button
+              className={`${styles.zoomButton} ${zoomMode === "fit-page" ? styles.zoomActive : ""}`}
+              onClick={() => onZoomModeChange(zoomMode === "fit-page" ? "custom" : "fit-page")}
+              title="Fit page"
+              aria-label="Fit page"
+            >
+              <FitPageIcon />
             </button>
 
             <button
               className={styles.iconButton}
               onClick={handleZoomIn}
-              disabled={zoom >= ZOOM_MAX}
+              disabled={zoomMode !== "custom" || zoom >= ZOOM_MAX}
               title="Zoom in"
               aria-label="Zoom in"
             >
@@ -175,6 +189,15 @@ export default function Toolbar({
             <div className={styles.divider} />
           </>
         )}
+
+        <button
+          className={styles.iconButton}
+          onClick={onOpenSettings}
+          title="Settings"
+          aria-label="Settings"
+        >
+          <GearIcon />
+        </button>
 
         <button
           className={styles.iconButton}
@@ -243,6 +266,32 @@ function PlusIcon() {
   );
 }
 
+function FitWidthIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      {/* Left arrow */}
+      <polyline points="4,5 1,8 4,11" />
+      {/* Right arrow */}
+      <polyline points="12,5 15,8 12,11" />
+      {/* Horizontal line */}
+      <line x1="1" y1="8" x2="15" y2="8" />
+    </svg>
+  );
+}
+
+function FitPageIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      {/* Page outline */}
+      <rect x="3" y="1" width="10" height="14" rx="1" />
+      {/* Inner fit arrows - vertical */}
+      <polyline points="6.5,4 8,2.5 9.5,4" />
+      <polyline points="6.5,12 8,13.5 9.5,12" />
+      <line x1="8" y1="2.5" x2="8" y2="13.5" />
+    </svg>
+  );
+}
+
 function SunIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -281,6 +330,15 @@ function SpinnerSmall() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
       <path d="M8 2a6 6 0 016 6" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="2.5" />
+      <path d="M13.3 10a1.1 1.1 0 00.2 1.2l.04.04a1.33 1.33 0 11-1.88 1.88l-.04-.04a1.1 1.1 0 00-1.2-.2 1.1 1.1 0 00-.67 1.01v.12a1.33 1.33 0 11-2.67 0v-.06a1.1 1.1 0 00-.72-1.01 1.1 1.1 0 00-1.2.2l-.04.04a1.33 1.33 0 11-1.88-1.88l.04-.04a1.1 1.1 0 00.2-1.2 1.1 1.1 0 00-1.01-.67h-.12a1.33 1.33 0 110-2.67h.06a1.1 1.1 0 001.01-.72 1.1 1.1 0 00-.2-1.2l-.04-.04A1.33 1.33 0 114.88 2.92l.04.04a1.1 1.1 0 001.2.2h.05a1.1 1.1 0 00.67-1.01v-.12a1.33 1.33 0 112.67 0v.06a1.1 1.1 0 00.67 1.01 1.1 1.1 0 001.2-.2l.04-.04a1.33 1.33 0 111.88 1.88l-.04.04a1.1 1.1 0 00-.2 1.2v.05a1.1 1.1 0 001.01.67h.12a1.33 1.33 0 010 2.67h-.06a1.1 1.1 0 00-1.01.67z" />
     </svg>
   );
 }

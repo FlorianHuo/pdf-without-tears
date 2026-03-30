@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import type { TocItem } from "../../types/toc";
 import { generateTocId } from "../../types/toc";
+import type { AiTocProgress } from "../../utils/aiTocGenerator";
 import styles from "./TocPanel.module.css";
 
 interface TocPanelProps {
@@ -8,6 +9,9 @@ interface TocPanelProps {
   currentPage: number;
   onNavigate: (page: number) => void;
   onUpdate: (items: TocItem[]) => void;
+  onAiGenerate?: () => void;
+  onAiCancel?: () => void;
+  aiProgress?: AiTocProgress | null;
 }
 
 export default function TocPanel({
@@ -15,6 +19,9 @@ export default function TocPanel({
   currentPage,
   onNavigate,
   onUpdate,
+  onAiGenerate,
+  onAiCancel,
+  aiProgress,
 }: TocPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -116,14 +123,55 @@ export default function TocPanel({
     setEditingId(newItem.id);
   }, [items, onUpdate, currentPage]);
 
+  // Shift all page numbers by a delta (for page offset adjustment)
+  const applyPageOffset = useCallback((delta: number) => {
+    const shiftPages = (list: TocItem[]): TocItem[] =>
+      list.map((item) => ({
+        ...item,
+        pageNumber: item.pageNumber + delta,
+        children: shiftPages(item.children),
+      }));
+    onUpdate(shiftPages(items));
+  }, [items, onUpdate]);
+
+  const isGenerating = aiProgress != null &&
+    aiProgress.status !== "done" &&
+    aiProgress.status !== "error";
+
   if (items.length === 0) {
     return (
       <div className={styles.emptyState}>
-        <span className={styles.emptyIcon}>📑</span>
-        <p className={styles.emptyText}>No outline found</p>
-        <button className={styles.addButton} onClick={handleAddRoot}>
-          + Add first entry
-        </button>
+        {isGenerating ? (
+          <>
+            <div className={styles.aiSpinner} />
+            <p className={styles.aiProgressText}>{aiProgress?.message}</p>
+            {onAiCancel && (
+              <button
+                className={styles.addButton}
+                onClick={onAiCancel}
+                style={{ marginTop: 8 }}
+              >
+                Cancel
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <span className={styles.emptyIcon}>📑</span>
+            <p className={styles.emptyText}>No outline found</p>
+            {onAiGenerate && (
+              <button
+                className={styles.aiButton}
+                onClick={onAiGenerate}
+              >
+                ✨ AI Generate
+              </button>
+            )}
+            <button className={styles.addButton} onClick={handleAddRoot}>
+              + Add first entry
+            </button>
+          </>
+        )}
       </div>
     );
   }
@@ -148,9 +196,59 @@ export default function TocPanel({
         />
       </div>
       <div className={styles.tocFooter}>
-        <button className={styles.addButton} onClick={handleAddRoot}>
-          + Add entry
-        </button>
+        {isGenerating ? (
+          <div className={styles.aiProgressBar}>
+            <div className={styles.aiSpinnerSmall} />
+            <span className={styles.aiProgressText}>{aiProgress?.message}</span>
+            {onAiCancel && (
+              <button
+                className={styles.addButton}
+                onClick={onAiCancel}
+                style={{ padding: '2px 8px', fontSize: '11px' }}
+              >
+                Stop
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            {items.length > 0 && (
+              <div className={styles.offsetRow}>
+                <label className={styles.offsetLabel}>Page offset:</label>
+                <button
+                  className={styles.offsetBtn}
+                  onClick={() => applyPageOffset(-1)}
+                  title="Shift all page numbers by -1"
+                >-</button>
+                <button
+                  className={styles.offsetBtn}
+                  onClick={() => applyPageOffset(1)}
+                  title="Shift all page numbers by +1"
+                >+</button>
+                <button
+                  className={styles.offsetBtn}
+                  onClick={() => applyPageOffset(-10)}
+                  title="Shift all page numbers by -10"
+                  style={{ fontSize: '10px' }}
+                >-10</button>
+                <button
+                  className={styles.offsetBtn}
+                  onClick={() => applyPageOffset(10)}
+                  title="Shift all page numbers by +10"
+                  style={{ fontSize: '10px' }}
+                >+10</button>
+              </div>
+            )}
+            {onAiGenerate && (
+              <button className={styles.aiButton} onClick={onAiGenerate}>
+                ✨ AI Regenerate
+              </button>
+            )}
+            <button className={styles.addButton} onClick={handleAddRoot}>
+              + Add entry
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -234,6 +332,19 @@ function TocItemRow({
         style={{ paddingLeft: `${12 + item.depth * 16}px` }}
         onMouseEnter={() => setShowActions(true)}
         onMouseLeave={() => setShowActions(false)}
+        onClick={(e) => {
+          // Navigate on row click, but not if clicking on buttons/inputs
+          const tag = (e.target as HTMLElement).tagName;
+          if (tag !== "BUTTON" && tag !== "INPUT") {
+            onNavigate(item.pageNumber);
+          }
+        }}
+        onDoubleClick={(e) => {
+          const tag = (e.target as HTMLElement).tagName;
+          if (tag !== "BUTTON" && tag !== "INPUT") {
+            handleDoubleClick();
+          }
+        }}
       >
         {/* Collapse toggle */}
         {hasChildren ? (
@@ -265,8 +376,6 @@ function TocItemRow({
         ) : (
           <span
             className={styles.tocTitle}
-            onClick={() => onNavigate(item.pageNumber)}
-            onDoubleClick={handleDoubleClick}
             title={`${item.title} (p.${item.pageNumber})`}
           >
             {item.title}
@@ -276,7 +385,6 @@ function TocItemRow({
         {/* Page number */}
         <span
           className={styles.pageNum}
-          onClick={() => onNavigate(item.pageNumber)}
         >
           {item.pageNumber}
         </span>

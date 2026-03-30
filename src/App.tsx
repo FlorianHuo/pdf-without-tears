@@ -4,9 +4,17 @@ import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 import Toolbar from "./components/Toolbar/Toolbar";
 import Sidebar from "./components/Sidebar/Sidebar";
 import PdfViewer from "./components/PdfViewer/PdfViewer";
+import type { ZoomMode } from "./components/PdfViewer/PdfViewer";
 import StatusBar from "./components/StatusBar/StatusBar";
 import WelcomeScreen from "./components/WelcomeScreen/WelcomeScreen";
+import SettingsDialog from "./components/SettingsDialog/SettingsDialog";
 import { writeTocToPdf } from "./utils/tocWriter";
+import {
+  aiGenerateToc,
+  loadAiConfig,
+  getFullConfig,
+} from "./utils/aiTocGenerator";
+import type { AiTocProgress } from "./utils/aiTocGenerator";
 import type { TocItem } from "./types/toc";
 import styles from "./App.module.css";
 
@@ -29,6 +37,7 @@ function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [zoom, setZoom] = useState(1.0);
+  const [zoomMode, setZoomMode] = useState<ZoomMode>("fit-width");
 
   // --- TOC State ---
   const [tocItems, setTocItems] = useState<TocItem[]>([]);
@@ -38,9 +47,19 @@ function App() {
   // Keep the file path for saving back
   const filePathRef = useRef<string | null>(null);
 
+  // --- PDF Proxy (for AI TOC generation) ---
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfProxyRef = useRef<any>(null);
+
+  // --- AI TOC State ---
+  const [aiProgress, setAiProgress] = useState<AiTocProgress | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   // --- UI State ---
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
   const [isDragging, setIsDragging] = useState(false);
+  const isResizingRef = useRef(false);
 
   // --- Open File Handler ---
   const handleOpenFile = useCallback(async () => {
@@ -80,6 +99,7 @@ function App() {
       setCurrentPage(1);
       setTotalPages(0);
       setZoom(1.0);
+      setZoomMode("fit-width");
       setTocItems([]);
       setTocModified(false);
     } catch (err) {
@@ -96,6 +116,65 @@ function App() {
   const handleOutlineLoad = useCallback((items: TocItem[]) => {
     setTocItems(items);
     setTocModified(false);
+  }, []);
+
+  // --- PDF Proxy Handler ---
+  const handlePdfLoad = useCallback((pdf: unknown) => {
+    pdfProxyRef.current = pdf;
+  }, []);
+
+  // --- AI TOC Generation ---
+  const aiAbortRef = useRef<AbortController | null>(null);
+
+  const handleAiGenerate = useCallback(async () => {
+    const pdf = pdfProxyRef.current;
+    if (!pdf) return;
+
+    const savedConfig = loadAiConfig();
+    const config = getFullConfig(savedConfig);
+
+    if (!config) {
+      // No API key configured, open settings
+      setSettingsOpen(true);
+      return;
+    }
+
+    // Create abort controller for this generation
+    const abortController = new AbortController();
+    aiAbortRef.current = abortController;
+
+    try {
+      const result = await aiGenerateToc(pdf, config, (progress) => {
+        setAiProgress({ ...progress });
+      }, abortController.signal);
+
+      if (result.length > 0) {
+        setTocItems(result);
+        setTocModified(true);
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // User cancelled - not an error
+        setAiProgress({
+          status: "done",
+          message: "Generation cancelled.",
+        });
+      } else {
+        console.error("AI TOC generation failed:", err);
+        setAiProgress({
+          status: "error",
+          message: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    } finally {
+      aiAbortRef.current = null;
+      // Clear progress after a delay so user can see the final message
+      setTimeout(() => setAiProgress(null), 3000);
+    }
+  }, []);
+
+  const handleAiCancel = useCallback(() => {
+    aiAbortRef.current?.abort();
   }, []);
 
   // --- TOC Update Handler ---
@@ -167,6 +246,7 @@ function App() {
           setCurrentPage(1);
           setTotalPages(0);
           setZoom(1.0);
+          setZoomMode("fit-width");
           setTocItems([]);
           setTocModified(false);
         }
@@ -217,7 +297,7 @@ function App() {
       }
       if (isMod && e.key === "0") {
         e.preventDefault();
-        setZoom(1.0);
+        setZoomMode("fit-width");
       }
     };
 
@@ -238,30 +318,66 @@ function App() {
         currentPage={currentPage}
         totalPages={totalPages}
         zoom={zoom}
+        zoomMode={zoomMode}
         hasDocument={hasDocument}
         sidebarVisible={sidebarVisible}
         onOpenFile={handleOpenFile}
         onPageChange={setCurrentPage}
         onZoomChange={setZoom}
+        onZoomModeChange={setZoomMode}
         onToggleSidebar={() => setSidebarVisible(!sidebarVisible)}
         onToggleTheme={() => setIsDark(!isDark)}
         isDark={isDark}
         tocModified={tocModified}
         isSaving={isSaving}
         onSaveToc={handleSaveToc}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <div className={styles.workspace}>
         {hasDocument && (
-          <Sidebar
-            visible={sidebarVisible}
-            fileUrl={fileUrl}
-            totalPages={totalPages}
-            currentPage={currentPage}
-            tocItems={tocItems}
-            onPageChange={setCurrentPage}
-            onTocUpdate={handleTocUpdate}
-          />
+          <>
+            <Sidebar
+              visible={sidebarVisible}
+              fileUrl={fileUrl}
+              totalPages={totalPages}
+              currentPage={currentPage}
+              tocItems={tocItems}
+              onPageChange={setCurrentPage}
+              onTocUpdate={handleTocUpdate}
+              onAiGenerate={handleAiGenerate}
+              onAiCancel={handleAiCancel}
+              aiProgress={aiProgress}
+              width={sidebarWidth}
+            />
+            {sidebarVisible && (
+              <div
+                className={styles.resizeHandle}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  isResizingRef.current = true;
+                  const startX = e.clientX;
+                  const startWidth = sidebarWidth;
+                  const onMouseMove = (ev: MouseEvent) => {
+                    if (!isResizingRef.current) return;
+                    const newWidth = Math.max(200, Math.min(600, startWidth + ev.clientX - startX));
+                    setSidebarWidth(newWidth);
+                  };
+                  const onMouseUp = () => {
+                    isResizingRef.current = false;
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                  };
+                  document.addEventListener('mousemove', onMouseMove);
+                  document.addEventListener('mouseup', onMouseUp);
+                  document.body.style.cursor = 'col-resize';
+                  document.body.style.userSelect = 'none';
+                }}
+              />
+            )}
+          </>
         )}
 
         <main className={styles.main}>
@@ -270,9 +386,11 @@ function App() {
               fileUrl={fileUrl}
               currentPage={currentPage}
               zoom={zoom}
+              zoomMode={zoomMode}
               onDocumentLoad={handleDocumentLoad}
               onPageChange={setCurrentPage}
               onOutlineLoad={handleOutlineLoad}
+              onPdfLoad={handlePdfLoad}
             />
           ) : (
             <WelcomeScreen
@@ -288,6 +406,10 @@ function App() {
         totalPages={totalPages}
         zoom={zoom}
         fileName={fileName}
+      />
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );

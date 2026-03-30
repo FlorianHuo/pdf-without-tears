@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { Document, Page } from "react-pdf";
 import TocPanel from "../TocPanel/TocPanel";
 import type { TocItem } from "../../types/toc";
+import type { AiTocProgress } from "../../utils/aiTocGenerator";
 import styles from "./Sidebar.module.css";
 
 type SidebarTab = "pages" | "outline";
@@ -14,6 +15,10 @@ interface SidebarProps {
   tocItems: TocItem[];
   onPageChange: (page: number) => void;
   onTocUpdate: (items: TocItem[]) => void;
+  onAiGenerate?: () => void;
+  onAiCancel?: () => void;
+  aiProgress?: AiTocProgress | null;
+  width?: number;
 }
 
 // Thumbnail dimensions
@@ -33,6 +38,10 @@ export default function Sidebar({
   tocItems,
   onPageChange,
   onTocUpdate,
+  onAiGenerate,
+  onAiCancel,
+  aiProgress,
+  width,
 }: SidebarProps) {
   // Default to "outline" tab if the PDF has an outline, otherwise "pages"
   const [activeTab, setActiveTab] = useState<SidebarTab>(
@@ -49,7 +58,7 @@ export default function Sidebar({
   if (!visible) return null;
 
   return (
-    <div className={styles.sidebar}>
+    <div className={styles.sidebar} style={width ? { width, minWidth: width } : undefined}>
       {/* Tab bar */}
       <div className={styles.tabBar}>
         <button
@@ -83,6 +92,9 @@ export default function Sidebar({
           currentPage={currentPage}
           onNavigate={onPageChange}
           onUpdate={onTocUpdate}
+          onAiGenerate={onAiGenerate}
+          onAiCancel={onAiCancel}
+          aiProgress={aiProgress}
         />
       )}
     </div>

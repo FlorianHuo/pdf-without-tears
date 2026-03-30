@@ -12,6 +12,20 @@
   overflow: hidden;
 }
 
+.resizeHandle {
+  width: 4px;
+  cursor: col-resize;
+  background-color: transparent;
+  flex-shrink: 0;
+  transition: background-color 0.15s;
+  z-index: 10;
+}
+
+.resizeHandle:hover,
+.resizeHandle:active {
+  background-color: var(--color-accent);
+}
+
 .main {
   flex: 1;
   display: flex;

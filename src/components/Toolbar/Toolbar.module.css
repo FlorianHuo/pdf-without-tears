@@ -106,6 +106,16 @@
   color: var(--color-text-primary);
 }
 
+.zoomActive {
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.zoomActive:hover {
+  background-color: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
 .saveButton {
   color: var(--color-accent);
 }
