@@ -61,6 +61,23 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const isResizingRef = useRef(false);
 
+  // --- Toast Notification ---
+  const [toasts, setToasts] = useState<
+    { id: number; message: string; type: "success" | "error" | "warning" }[]
+  >([]);
+  const toastIdRef = useRef(0);
+
+  const showToast = useCallback(
+    (message: string, type: "success" | "error" | "warning" = "success") => {
+      const id = ++toastIdRef.current;
+      setToasts((prev) => [...prev, { id, message, type }]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 4000);
+    },
+    [],
+  );
+
   // --- Open File Handler ---
   const handleOpenFile = useCallback(async () => {
     try {
@@ -104,6 +121,7 @@ function App() {
       setTocModified(false);
     } catch (err) {
       console.error("Failed to read PDF file:", err);
+      showToast("Failed to open PDF file.", "error");
     }
   };
 
@@ -135,6 +153,7 @@ function App() {
 
     if (!config) {
       // No API key configured, open settings
+      showToast("Please configure your API key first.", "warning");
       setSettingsOpen(true);
       return;
     }
@@ -161,6 +180,10 @@ function App() {
         });
       } else {
         console.error("AI TOC generation failed:", err);
+        showToast(
+          `AI generation failed: ${err instanceof Error ? err.message : String(err)}`,
+          "error",
+        );
         setAiProgress({
           status: "error",
           message: `Error: ${err instanceof Error ? err.message : String(err)}`,
@@ -203,10 +226,10 @@ function App() {
       await writeFile(filePath, modifiedBytes);
 
       setTocModified(false);
-      console.log("TOC saved successfully to", filePath);
+      showToast("TOC saved successfully.", "success");
     } catch (err) {
       console.error("Failed to save TOC:", err);
-      // TODO: Show user-facing error notification
+      showToast("Failed to save TOC to PDF.", "error");
     } finally {
       setIsSaving(false);
     }
@@ -411,6 +434,24 @@ function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+      {toasts.length > 0 && (
+        <div className={styles.toastContainer}>
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              className={`${styles.toast} ${
+                t.type === "success"
+                  ? styles.toastSuccess
+                  : t.type === "error"
+                    ? styles.toastError
+                    : styles.toastWarning
+              }`}
+            >
+              {t.message}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
