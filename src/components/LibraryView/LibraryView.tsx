@@ -2,12 +2,14 @@ import type { Book } from "../../types/book";
 import BookCard from "../BookCard/BookCard";
 import styles from "./LibraryView.module.css";
 
+
 interface LibraryViewProps {
   onOpenBook: (bookId: number) => void;
   onImport: () => void;
   isDragging: boolean;
   books: Book[];
   importing: boolean;
+  onContextMenu?: (book: Book, x: number, y: number) => void;
 }
 
 export default function LibraryView({
@@ -16,6 +18,7 @@ export default function LibraryView({
   isDragging,
   books,
   importing,
+  onContextMenu,
 }: LibraryViewProps) {
 
   // Empty state
@@ -84,7 +87,7 @@ export default function LibraryView({
       )}
       <div className={styles.grid}>
         {books.map((book) => (
-          <BookCard key={book.id} book={book} onOpen={onOpenBook} />
+          <BookCard key={book.id} book={book} onOpen={onOpenBook} onContextMenu={onContextMenu} />
         ))}
       </div>
     </div>

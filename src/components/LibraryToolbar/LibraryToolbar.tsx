@@ -1,19 +1,28 @@
+import type { SortField, SortDirection } from "../../types/book";
 import styles from "./LibraryToolbar.module.css";
 
 interface LibraryToolbarProps {
   onImport: () => void;
+  onBatchImport: () => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
   isDark: boolean;
   bookCount: number;
+  sortField: SortField;
+  sortDirection: SortDirection;
+  onSortChange: (field: SortField, direction: SortDirection) => void;
 }
 
 export default function LibraryToolbar({
   onImport,
+  onBatchImport,
   onOpenSettings,
   onToggleTheme,
   isDark,
   bookCount,
+  sortField,
+  sortDirection,
+  onSortChange,
 }: LibraryToolbarProps) {
   return (
     <div className={styles.toolbar}>
@@ -36,6 +45,34 @@ export default function LibraryToolbar({
           <PlusIcon />
           <span>Import</span>
         </button>
+
+        <button
+          className={styles.importButton}
+          onClick={onBatchImport}
+          title="Import from folder"
+          aria-label="Import from folder"
+        >
+          <FolderIcon />
+          <span>Folder</span>
+        </button>
+
+        <div className={styles.divider} />
+
+        <select
+          className={styles.sortSelect}
+          value={`${sortField}:${sortDirection}`}
+          onChange={(e) => {
+            const [f, d] = e.target.value.split(":");
+            onSortChange(f as SortField, d as SortDirection);
+          }}
+          title="Sort books"
+        >
+          <option value="last_opened_at:desc">Recent</option>
+          <option value="added_at:desc">Newest</option>
+          <option value="title:asc">Title A–Z</option>
+          <option value="title:desc">Title Z–A</option>
+          <option value="author:asc">Author A–Z</option>
+        </select>
 
         <div className={styles.divider} />
 
@@ -99,6 +136,14 @@ function MoonIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M13.5 8.5a5.5 5.5 0 01-7-7 5.5 5.5 0 107 7z" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 4a1 1 0 011-1h3.586a1 1 0 01.707.293L8.5 4.5H13a1 1 0 011 1V12a1 1 0 01-1 1H3a1 1 0 01-1-1V4z" />
     </svg>
   );
 }

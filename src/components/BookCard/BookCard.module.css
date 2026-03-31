@@ -104,3 +104,25 @@
   background-color: var(--color-accent);
   transition: width var(--transition-normal);
 }
+
+.archived {
+  opacity: 0.55;
+}
+
+.statusBadge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  width: fit-content;
+  line-height: 1.4;
+}
+
+.reading {
+  background: rgba(230, 126, 34, 0.15);
+  color: #e67e22;
+}
+
+.finished {
+  background: rgba(46, 204, 113, 0.15);
+  color: #27ae60;
+}

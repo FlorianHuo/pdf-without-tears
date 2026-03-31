@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { readFile, writeFile } from "@tauri-apps/plugin-fs";
+import { readFile, writeFile, remove } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Toolbar from "./components/Toolbar/Toolbar";
 import LibraryToolbar from "./components/LibraryToolbar/LibraryToolbar";
@@ -10,6 +10,11 @@ import type { ZoomMode } from "./components/PdfViewer/PdfViewer";
 import StatusBar from "./components/StatusBar/StatusBar";
 import LibraryView from "./components/LibraryView/LibraryView";
 import SettingsDialog from "./components/SettingsDialog/SettingsDialog";
+import FilterBar from "./components/FilterBar/FilterBar";
+import BookDetailDialog from "./components/BookDetailDialog/BookDetailDialog";
+import ConfirmDialog from "./components/ConfirmDialog/ConfirmDialog";
+import BookContextMenu from "./components/BookContextMenu/BookContextMenu";
+import type { ContextMenuAction } from "./components/BookContextMenu/BookContextMenu";
 import { writeTocToPdf } from "./utils/tocWriter";
 import {
   aiGenerateToc,
@@ -17,12 +22,27 @@ import {
   getFullConfig,
 } from "./utils/aiTocGenerator";
 import type { AiTocProgress } from "./utils/aiTocGenerator";
-import { getAllBooks, getBookById, updateBook, addBook, getBookByPath } from "./utils/db";
+import {
+  getBookById,
+  updateBook,
+  addBook,
+  getBookByPath,
+  getBooks,
+  deleteBook,
+  archiveBook,
+  unarchiveBook,
+  updateBookStatus,
+  getAllTags,
+  getAllCategories,
+} from "./utils/db";
 import {
   generateThumbnail,
   getPdfPageCount,
 } from "./utils/thumbnailGenerator";
-import type { Book } from "./types/book";
+import { fuzzySearchBooks } from "./utils/search";
+import { extractFromPdf } from "./utils/metadata";
+import { scanDirectoryForPdfs } from "./utils/batchImport";
+import type { Book, BookStatus, SortField, SortDirection, BookFilter, BookSort } from "./types/book";
 import type { TocItem } from "./types/toc";
 import styles from "./App.module.css";
 
@@ -49,18 +69,74 @@ function App() {
   // --- Library State ---
   const [books, setBooks] = useState<Book[]>([]);
 
+  // --- Filter & Search State ---
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTags, setActiveTags] = useState<string[]>([]);
+  const [activeCategory, setActiveCategory] = useState("");
+  const [activeStatus, setActiveStatus] = useState<BookStatus | "">("");
+  const [showArchived, setShowArchived] = useState(false);
+
+  // --- Sort State ---
+  const [sortField, setSortField] = useState<SortField>("last_opened_at");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+
+  // --- Aggregation State ---
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [allCategories, setAllCategories] = useState<string[]>([]);
+
+  // --- Context Menu State ---
+  const [contextMenu, setContextMenu] = useState<{
+    book: Book;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // --- Edit & Confirm Dialog State ---
+  const [editingBook, setEditingBook] = useState<Book | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    danger: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
   const refreshBooks = useCallback(async () => {
     try {
-      const allBooks = await getAllBooks();
-      setBooks(allBooks);
+      const filter: BookFilter = {
+        isArchived: showArchived,
+      };
+      if (activeStatus) filter.status = activeStatus;
+      if (activeCategory) filter.category = activeCategory;
+      if (activeTags.length > 0) filter.tags = activeTags;
+
+      const sort: BookSort = {
+        field: sortField,
+        direction: sortDirection,
+      };
+
+      const result = await getBooks(filter, sort);
+      setBooks(result);
+
+      const [tags, categories] = await Promise.all([
+        getAllTags(),
+        getAllCategories(),
+      ]);
+      setAllTags(tags);
+      setAllCategories(categories);
     } catch (err) {
       console.error("Failed to load books:", err);
     }
-  }, []);
+  }, [showArchived, activeStatus, activeCategory, activeTags, sortField, sortDirection]);
 
   useEffect(() => {
     refreshBooks();
   }, [refreshBooks]);
+
+  // --- Client-side fuzzy search ---
+  const displayedBooks = useMemo(() => {
+    if (!searchQuery.trim()) return books;
+    return fuzzySearchBooks(books, searchQuery);
+  }, [books, searchQuery]);
 
   const thumbnailBackfillAttemptedRef = useRef(new Set<number>());
 
@@ -143,12 +219,11 @@ function App() {
         const pdfBytes = new Uint8Array(fileData);
         const totalPg = await getPdfPageCount(pdfBytes);
 
-        const fName = filePath.split("/").pop() || "document.pdf";
-        const title = fName.replace(/\.pdf$/i, "");
+        const meta = await extractFromPdf(pdfBytes, filePath);
 
         const book = await addBook({
-          title,
-          author: "",
+          title: meta.title,
+          author: meta.author,
           file_path: filePath,
           is_copied: false,
           cover_thumb_path: null,
@@ -171,6 +246,85 @@ function App() {
     } catch (err) {
       console.error("Import failed:", err);
       showToast("Failed to import PDF.", "error");
+    } finally {
+      setImporting(false);
+    }
+  }, [refreshBooks, showToast]);
+
+  // --- Delete Book ---
+  const handleDeleteBook = useCallback(async (bookId: number) => {
+    try {
+      const paths = await deleteBook(bookId);
+      if (paths?.thumbPath) {
+        try { await remove(paths.thumbPath); } catch { /* ignore */ }
+      }
+      await refreshBooks();
+      showToast("Book removed from library.", "success");
+    } catch (err) {
+      console.error("Delete failed:", err);
+      showToast("Failed to delete book.", "error");
+    }
+  }, [refreshBooks, showToast]);
+
+  // --- Batch Import ---
+  const handleBatchImport = useCallback(async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select folder to scan for PDFs",
+      });
+      if (!selected) return;
+
+      const dirPath = selected as string;
+      showToast("Scanning directory\u2026", "success");
+
+      const { pdfPaths, errors } = await scanDirectoryForPdfs(dirPath);
+      if (errors.length > 0) console.warn("Scan errors:", errors);
+      if (pdfPaths.length === 0) {
+        showToast("No PDF files found.", "warning");
+        return;
+      }
+
+      setImporting(true);
+      let imported = 0;
+
+      for (const filePath of pdfPaths) {
+        const existing = await getBookByPath(filePath);
+        if (existing) continue;
+
+        const fileData = await readFile(filePath);
+        const pdfBytes = new Uint8Array(fileData);
+        const totalPg = await getPdfPageCount(pdfBytes);
+        const meta = await extractFromPdf(pdfBytes, filePath);
+
+        const book = await addBook({
+          title: meta.title,
+          author: meta.author,
+          file_path: filePath,
+          is_copied: false,
+          cover_thumb_path: null,
+          tags: [],
+          category: "",
+          last_page: 1,
+          total_pages: totalPg,
+        });
+
+        generateThumbnail(pdfBytes, book.id)
+          .then(async (thumbPath) => {
+            await updateBook(book.id, { cover_thumb_path: thumbPath });
+            refreshBooks();
+          })
+          .catch((err) => console.error("Thumbnail failed:", err));
+
+        imported++;
+      }
+
+      await refreshBooks();
+      showToast(`Imported ${imported} book${imported !== 1 ? "s" : ""}.`, "success");
+    } catch (err) {
+      console.error("Batch import failed:", err);
+      showToast("Batch import failed.", "error");
     } finally {
       setImporting(false);
     }
@@ -271,6 +425,68 @@ function App() {
       showToast("Failed to open book.", "error");
     }
   }, [showToast]);
+
+  // --- Context Menu Handler ---
+  const handleContextMenuAction = useCallback(
+    async (action: ContextMenuAction) => {
+      setContextMenu(null);
+      switch (action.kind) {
+        case "open":
+          handleOpenBook(action.book.id);
+          break;
+        case "edit":
+          setEditingBook(action.book);
+          break;
+        case "archive":
+          await archiveBook(action.book.id);
+          showToast("Book archived.", "success");
+          refreshBooks();
+          break;
+        case "unarchive":
+          await unarchiveBook(action.book.id);
+          showToast("Book unarchived.", "success");
+          refreshBooks();
+          break;
+        case "status":
+          if (action.status) {
+            await updateBookStatus(action.book.id, action.status);
+            refreshBooks();
+          }
+          break;
+        case "delete":
+          setConfirmDialog({
+            title: "Delete Book",
+            message: `Remove "${action.book.title}" from your library? The PDF file on disk will not be deleted.`,
+            danger: true,
+            onConfirm: async () => {
+              await handleDeleteBook(action.book.id);
+              setConfirmDialog(null);
+            },
+          });
+          break;
+      }
+    },
+    [handleOpenBook, handleDeleteBook, refreshBooks, showToast],
+  );
+
+  // --- Save Book Details ---
+  const handleSaveBookDetails = useCallback(
+    async (
+      bookId: number,
+      fields: {
+        title: string;
+        author: string;
+        tags: string[];
+        category: string;
+        status: BookStatus;
+      },
+    ) => {
+      await updateBook(bookId, fields);
+      await refreshBooks();
+      showToast("Book updated.", "success");
+    },
+    [refreshBooks, showToast],
+  );
 
   // --- Back to Library ---
   const handleBackToLibrary = useCallback(async () => {
@@ -500,12 +716,11 @@ function App() {
               const pdfBytes = new Uint8Array(fileData);
               const totalPg = await getPdfPageCount(pdfBytes);
 
-              const fName = filePath.split("/").pop() || "document.pdf";
-              const title = fName.replace(/\.pdf$/i, "");
+              const meta = await extractFromPdf(pdfBytes, filePath);
 
               const book = await addBook({
-                title,
-                author: "",
+                title: meta.title,
+                author: meta.author,
                 file_path: filePath,
                 is_copied: false,
                 cover_thumb_path: null,
@@ -620,10 +835,17 @@ function App() {
       {view.kind === "library" ? (
         <LibraryToolbar
           onImport={handleImportToLibrary}
+          onBatchImport={handleBatchImport}
           onOpenSettings={() => setSettingsOpen(true)}
           onToggleTheme={() => setIsDark(!isDark)}
           isDark={isDark}
-          bookCount={books.length}
+          bookCount={displayedBooks.length}
+          sortField={sortField}
+          sortDirection={sortDirection}
+          onSortChange={(field, dir) => {
+            setSortField(field);
+            setSortDirection(dir);
+          }}
         />
       ) : (
         <Toolbar
@@ -645,6 +867,36 @@ function App() {
           onSaveToc={handleSaveToc}
           onOpenSettings={() => setSettingsOpen(true)}
           onBackToLibrary={handleBackToLibrary}
+        />
+      )}
+
+      {view.kind === "library" && (
+        <FilterBar
+          searchQuery={searchQuery}
+          activeTags={activeTags}
+          activeCategory={activeCategory}
+          activeStatus={activeStatus}
+          showArchived={showArchived}
+          allTags={allTags}
+          allCategories={allCategories}
+          onSearchChange={setSearchQuery}
+          onTagToggle={(tag) =>
+            setActiveTags((prev) =>
+              prev.includes(tag)
+                ? prev.filter((t) => t !== tag)
+                : [...prev, tag],
+            )
+          }
+          onCategoryChange={setActiveCategory}
+          onStatusChange={setActiveStatus}
+          onArchiveToggle={() => setShowArchived(!showArchived)}
+          onClearAll={() => {
+            setSearchQuery("");
+            setActiveTags([]);
+            setActiveCategory("");
+            setActiveStatus("");
+            setShowArchived(false);
+          }}
         />
       )}
 
@@ -700,8 +952,11 @@ function App() {
               onOpenBook={handleOpenBook}
               onImport={handleImportToLibrary}
               isDragging={isDragging}
-              books={books}
+              books={displayedBooks}
               importing={importing}
+              onContextMenu={(book, x, y) =>
+                setContextMenu({ book, x, y })
+              }
             />
           ) : hasDocument ? (
             <PdfViewer
@@ -730,6 +985,37 @@ function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+
+      {contextMenu && (
+        <BookContextMenu
+          book={contextMenu.book}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onAction={handleContextMenuAction}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      <BookDetailDialog
+        open={editingBook !== null}
+        book={editingBook}
+        allTags={allTags}
+        allCategories={allCategories}
+        onSave={handleSaveBookDetails}
+        onClose={() => setEditingBook(null)}
+      />
+
+      {confirmDialog && (
+        <ConfirmDialog
+          open
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          danger={confirmDialog.danger}
+          confirmLabel="Delete"
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
       {toasts.length > 0 && (
         <div className={styles.toastContainer}>
           {toasts.map((t) => (

@@ -9,17 +9,22 @@ import styles from "./BookCard.module.css";
 interface BookCardProps {
   book: Book;
   onOpen: (bookId: number) => void;
+  onContextMenu?: (book: Book, x: number, y: number) => void;
 }
 
-export default function BookCard({ book, onOpen }: BookCardProps) {
+export default function BookCard({ book, onOpen, onContextMenu }: BookCardProps) {
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const progress =
     book.total_pages > 0 ? book.last_page / book.total_pages : 0;
 
   return (
     <div
-      className={styles.card}
+      className={`${styles.card} ${book.is_archived ? styles.archived : ""}`}
       onClick={() => onOpen(book.id)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu?.(book, e.clientX, e.clientY);
+      }}
       title={book.title}
     >
       <div className={styles.cover}>
@@ -39,6 +44,11 @@ export default function BookCard({ book, onOpen }: BookCardProps) {
         <span className={styles.title}>{book.title}</span>
         {book.author && (
           <span className={styles.author}>{book.author}</span>
+        )}
+        {book.status !== "unread" && (
+          <span className={`${styles.statusBadge} ${styles[book.status]}`}>
+            {book.status === "reading" ? "Reading" : "Finished"}
+          </span>
         )}
       </div>
       {progress > 0 && progress < 1 && (
