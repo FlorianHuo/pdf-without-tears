@@ -6,18 +6,13 @@ import {
   useMemo,
   useLayoutEffect,
 } from "react";
-import { Document, Page, pdfjs } from "react-pdf";
+import { Document, Page } from "react-pdf";
+import { pdfDocumentOptions } from "../../utils/pdfSetup";
 import { extractOutline } from "../../utils/tocExtractor";
 import type { TocItem } from "../../types/toc";
 // Annotation layer disabled: popup annotations render inline and break layout
 import "react-pdf/dist/Page/TextLayer.css";
 import styles from "./PdfViewer.module.css";
-
-// Configure pdf.js worker - MUST be in the same file as <Document>
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
 
 export type ZoomMode = "fit-width" | "fit-page" | "custom";
 
@@ -397,6 +392,7 @@ export default function PdfViewer({
     >
       <Document
         file={fileUrl}
+        options={pdfDocumentOptions}
         onLoadSuccess={onDocumentLoadSuccess}
         loading={
           <div className={styles.loading}>

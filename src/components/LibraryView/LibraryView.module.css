@@ -1,0 +1,125 @@
+/* Empty state */
+.empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-secondary);
+  transition: background-color var(--transition-normal);
+}
+
+.empty.dragging {
+  background-color: var(--color-accent-subtle);
+}
+
+.emptyContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-10);
+  animation: fadeIn 0.4s ease;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.logoMark {
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-2);
+}
+
+.title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.3px;
+}
+
+.subtitle {
+  font-size: var(--font-size-base);
+  color: var(--color-text-tertiary);
+}
+
+.dropZone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-10) var(--space-16);
+  border: 1.5px dashed var(--color-border);
+  border-radius: var(--radius-xl);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-normal),
+    background-color var(--transition-normal);
+}
+
+.dropZone:hover {
+  border-color: var(--color-border-strong);
+  background-color: var(--color-bg-tertiary);
+}
+
+.empty.dragging .dropZone {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent-subtle);
+}
+
+.dropIcon {
+  color: var(--color-text-tertiary);
+}
+
+.dropText {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+}
+
+.dropHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  background-color: var(--color-bg-tertiary);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family-mono);
+}
+
+/* Grid view */
+.container {
+  flex: 1;
+  overflow-y: auto;
+  background-color: var(--color-bg-secondary);
+  transition: background-color var(--transition-normal);
+}
+
+.container.dragging {
+  background-color: var(--color-accent-subtle);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.importingBanner {
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--color-accent-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

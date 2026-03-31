@@ -1,0 +1,106 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border-subtle);
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    box-shadow var(--transition-normal),
+    border-color var(--transition-normal),
+    transform var(--transition-normal);
+}
+
+.card:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: 0 4px 12px var(--color-shadow);
+  transform: translateY(-2px);
+}
+
+.card:active {
+  transform: translateY(0);
+}
+
+.cover {
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background-color: var(--color-bg-tertiary);
+}
+
+.coverImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pdfPreview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background-color: var(--color-bg-tertiary);
+}
+
+.pdfPreview :global(.react-pdf__Document) {
+  width: 100%;
+}
+
+.pdfPreview :global(.react-pdf__Page) {
+  display: flex;
+  justify-content: center;
+}
+
+.pdfPreview :global(.react-pdf__Page canvas) {
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+}
+
+.placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+}
+
+.info {
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 44px;
+}
+
+.title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: var(--line-height-tight);
+}
+
+.author {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progressTrack {
+  height: 2px;
+  background-color: var(--color-bg-tertiary);
+}
+
+.progressBar {
+  height: 100%;
+  background-color: var(--color-accent);
+  transition: width var(--transition-normal);
+}

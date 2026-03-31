@@ -13,6 +13,53 @@ type PDFDocumentProxy = any;
 const DEFAULT_SCALE = 1.5;
 const JPEG_QUALITY = 0.75;
 
+function createRenderCanvas(width: number, height: number) {
+  if (typeof document !== "undefined") {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.ceil(width));
+    canvas.height = Math.max(1, Math.ceil(height));
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Failed to create 2D canvas context.");
+    }
+    return { canvas, context };
+  }
+
+  if (typeof OffscreenCanvas !== "undefined") {
+    const canvas = new OffscreenCanvas(
+      Math.max(1, Math.ceil(width)),
+      Math.max(1, Math.ceil(height)),
+    );
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Failed to create offscreen canvas context.");
+    }
+    return { canvas, context };
+  }
+
+  throw new Error("No canvas implementation available.");
+}
+
+async function canvasToDataUrl(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+): Promise<string> {
+  if (canvas instanceof HTMLCanvasElement) {
+    return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  }
+
+  const blob = await canvas.convertToBlob({
+    type: "image/jpeg",
+    quality: JPEG_QUALITY,
+  });
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 /**
  * Render a single PDF page to a base64 JPEG data URL.
  *
@@ -29,42 +76,20 @@ export async function renderPageToBase64(
   const page = await pdf.getPage(pageNumber);
   const viewport = page.getViewport({ scale });
 
-  // Use OffscreenCanvas if available (better performance, no DOM needed)
-  // Falls back to regular canvas for compatibility
-  let canvas: HTMLCanvasElement | OffscreenCanvas;
-  let ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-
-  if (typeof OffscreenCanvas !== "undefined") {
-    canvas = new OffscreenCanvas(viewport.width, viewport.height);
-    ctx = canvas.getContext("2d")!;
-  } else {
-    canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    ctx = canvas.getContext("2d")!;
-  }
+  const { canvas, context } = createRenderCanvas(
+    viewport.width,
+    viewport.height,
+  );
 
   // Render the page
   await page.render({
-    canvasContext: ctx,
+    canvasContext: context,
     viewport,
   }).promise;
 
-  // Convert to base64 JPEG
-  if (canvas instanceof OffscreenCanvas) {
-    const blob = await canvas.convertToBlob({
-      type: "image/jpeg",
-      quality: JPEG_QUALITY,
-    });
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } else {
-    return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-  }
+  const dataUrl = await canvasToDataUrl(canvas);
+  page.cleanup();
+  return dataUrl;
 }
 
 /**

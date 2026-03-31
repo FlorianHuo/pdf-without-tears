@@ -19,6 +19,7 @@ interface ToolbarProps {
   isSaving?: boolean;
   onSaveToc?: () => void;
   onOpenSettings?: () => void;
+  onBackToLibrary?: () => void;
 }
 
 // Zoom presets
@@ -44,6 +45,7 @@ export default function Toolbar({
   isSaving,
   onSaveToc,
   onOpenSettings,
+  onBackToLibrary,
 }: ToolbarProps) {
   const handlePageInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -71,6 +73,20 @@ export default function Toolbar({
     <div className={styles.toolbar}>
       {/* Left section */}
       <div className={styles.section}>
+        {onBackToLibrary && (
+          <>
+            <button
+              className={styles.iconButton}
+              onClick={onBackToLibrary}
+              title="Back to library (Esc)"
+              aria-label="Back to library"
+            >
+              <BackIcon />
+            </button>
+            <div className={styles.divider} />
+          </>
+        )}
+
         <button
           className={styles.iconButton}
           onClick={onToggleSidebar}
@@ -215,6 +231,14 @@ export default function Toolbar({
 /* ============================================================
    Inline SVG Icons (lightweight, no dependency needed)
    ============================================================ */
+
+function BackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="10,3 5,8 10,13" />
+    </svg>
+  );
+}
 
 function SidebarIcon() {
   return (

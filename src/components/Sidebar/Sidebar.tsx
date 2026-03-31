@@ -3,6 +3,7 @@ import { Document, Page } from "react-pdf";
 import TocPanel from "../TocPanel/TocPanel";
 import type { TocItem } from "../../types/toc";
 import type { AiTocProgress } from "../../utils/aiTocGenerator";
+import { pdfDocumentOptions } from "../../utils/pdfSetup";
 import styles from "./Sidebar.module.css";
 
 type SidebarTab = "pages" | "outline";
@@ -181,7 +182,7 @@ function PageThumbnails({
       onScroll={handleScroll}
     >
       {fileUrl && totalPages > 0 && (
-        <Document file={fileUrl} loading={null}>
+        <Document file={fileUrl} options={pdfDocumentOptions} loading={null}>
           <div
             className={styles.virtualList}
             style={{ height: totalListHeight }}
