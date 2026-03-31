@@ -1,7 +1,8 @@
 .tocPanel {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .tocList {
@@ -262,11 +263,36 @@
   text-align: center;
 }
 
+.footerProgressText {
+  text-align: left;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .aiProgressBar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) 0;
+  width: 100%;
+}
+
+.stopButton {
+  font-size: 11px;
+  color: #dc2626;
+  background: #fee2e2;
+  border: 1px solid #f87171;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.stopButton:hover {
+  background: #fecaca;
 }
 
 /* ---- Page offset controls ---- */

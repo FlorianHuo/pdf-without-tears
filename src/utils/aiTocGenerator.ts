@@ -34,6 +34,7 @@ export interface AiTocProgress {
 interface RawTocEntry {
   title: string;
   page: number;
+  printed_page: string; // The literal string shown in the TOC (e.g. "iv", "24")
   level: number; // 0 = top-level, 1 = section, 2 = subsection, etc.
 }
 
@@ -42,7 +43,6 @@ interface AiPageResponse {
   is_toc_page: boolean;
   entries: RawTocEntry[];
   is_toc_complete: boolean;
-  page_offset: number;
 }
 
 // Maximum pages to scan before giving up
@@ -60,11 +60,10 @@ Respond ONLY with a JSON object in this exact format:
 {
   "is_toc_page": true,
   "entries": [
-    {"title": "Chapter 1 Introduction", "page": 1, "level": 0},
-    {"title": "1.1 Background", "page": 5, "level": 1},
-    {"title": "1.1.1 History", "page": 7, "level": 2}
+    {"title": "Chapter 1 Introduction", "page": 1, "printed_page": "1", "level": 0},
+    {"title": "Preface", "page": 5, "printed_page": "v", "level": 1},
+    {"title": "1.1.1 History", "page": 7, "printed_page": "7", "level": 2}
   ],
-  "page_offset": 14,
   "is_toc_complete": true
 }
 
@@ -73,7 +72,8 @@ Rules:
 - "is_toc_complete" should be true if this page seems to be the LAST page of the TOC (the next page would be actual content)
 - If the page is NOT a TOC page (title page, preface, content, etc.), set "is_toc_page" to false and "entries" to []
 - Extract page numbers exactly as printed in the TOC.
-- "page_offset": I will tell you the PDF page number of this image. Compare it with the printed page number shown on this page (usually at the top or bottom). The offset = (PDF page number) - (printed page number on this page). For example, if I say this is PDF page 15 and the printed page number shown on this page is "xi" (11 in roman) or "1", the offset would be 15 - 1 = 14. If you cannot determine the offset, set it to 0.
+- "printed_page" is the literal string value of the page number as printed on the TOC (e.g., "1", "12", "i", "xiv").
+- "page" is the numeric form of the printed page. Do your best to parse roman numerals into numbers for this field. (e.g. "iv" -> 4).
 - Do NOT include decorative text, headers, or footers - only actual TOC entries.
 - Respond with ONLY the JSON object. No markdown, no explanation.`;
 
@@ -157,11 +157,11 @@ function parseAiResponse(content: string): AiPageResponse {
         ? parsed.entries.map((e: Record<string, unknown>) => ({
             title: String(e.title || "").trim(),
             page: Number(e.page) || 0,
+            printed_page: String(e.printed_page || "").trim(),
             level: Number(e.level) || 0,
           }))
         : [],
       is_toc_complete: Boolean(parsed.is_toc_complete),
-      page_offset: Number(parsed.page_offset) || 0,
     };
   } catch {
     console.error("Failed to parse AI response:", content);
@@ -169,7 +169,6 @@ function parseAiResponse(content: string): AiPageResponse {
       is_toc_page: false,
       entries: [],
       is_toc_complete: false,
-      page_offset: 0,
     };
   }
 }
@@ -239,7 +238,7 @@ export async function aiGenerateToc(
 
   let foundTocStart = false;
   let consecutiveNonToc = 0;
-  let detectedOffset = 0; // Page offset reported by AI
+  let lastTocPdfPage = 0;
 
   // Process pages in parallel batches, but evaluate results in order
   for (let batchStart = 1; batchStart <= maxPages; batchStart += CONCURRENCY) {
@@ -283,7 +282,7 @@ export async function aiGenerateToc(
           console.error(`Error processing page ${p}:`, err);
           const fallback = {
             pageNumber: p,
-            result: { is_toc_page: false, entries: [], is_toc_complete: false, page_offset: 0 } as AiPageResponse,
+            result: { is_toc_page: false, entries: [], is_toc_complete: false } as AiPageResponse,
           };
           settled.push(fallback);
           onProgress?.({
@@ -311,10 +310,7 @@ export async function aiGenerateToc(
       if (result.is_toc_page && result.entries.length > 0) {
         foundTocStart = true;
         consecutiveNonToc = 0;
-        // Capture page offset from the first TOC page only
-        if (detectedOffset === 0 && result.page_offset !== 0) {
-          detectedOffset = result.page_offset;
-        }
+        lastTocPdfPage = Math.max(lastTocPdfPage, pageNumber);
         allEntries.push(...result.entries);
 
         // Update progress with details
@@ -363,6 +359,18 @@ export async function aiGenerateToc(
     if (shouldStop) break;
   }
 
+  let pageLabels: string[] | null = null;
+  try {
+    pageLabels = await pdf.getPageLabels();
+    if (pageLabels && pageLabels.length > 0) {
+      console.log(`Loaded PDF page labels for exact page mapping`);
+    } else {
+      console.log(`No PDF page labels found, will use raw extracted page numbers`);
+    }
+  } catch (err) {
+    console.warn("Failed to read page labels:", err);
+  }
+
   // Handle results
   if (allEntries.length === 0) {
     onProgress?.({
@@ -379,19 +387,89 @@ export async function aiGenerateToc(
     totalEntries: allEntries.length,
   });
 
-  // Apply page offset from AI
-  // The AI reports page_offset on the first TOC page it finds.
-  // We use the first non-zero offset reported.
-  if (detectedOffset !== 0) {
-    console.log(`Applying AI-detected page offset: +${detectedOffset}`);
+  // Check if labels are dummy [1, 2, 3...] which means they are useless 
+  const isDummyLabels = pageLabels && pageLabels.length >= 2 && pageLabels[0] === "1" && pageLabels[1] === "2";
+  const validLabels = (!isDummyLabels && pageLabels && pageLabels.length > 0) ? pageLabels : null;
+
+  let offsetApplied = false;
+  if (validLabels) {
+    for (const entry of allEntries) {
+      if (entry.printed_page) {
+        const labelStr = String(entry.printed_page).trim().toLowerCase();
+        const pdfIndex = validLabels.findIndex(l => l.toLowerCase() === labelStr);
+        if (pdfIndex >= 0) {
+          entry.page = pdfIndex + 1; // 1-indexed PDF page
+          offsetApplied = true;
+        }
+      }
+    }
+  }
+
+  // If no valid labels, attempt heuristic text search to find main content offset
+  if (!offsetApplied && allEntries.length > 0 && lastTocPdfPage > 0) {
     onProgress?.({
       status: "parsing",
-      message: `Applying page offset: +${detectedOffset}`,
+      message: `Aligning pages via text search...`,
       totalEntries: allEntries.length,
     });
-    for (const entry of allEntries) {
-      entry.page += detectedOffset;
+
+    try {
+      // Find good candidates: Arabic page > 0 and reasonable title
+      const candidates = allEntries
+        .filter(e => e.page > 0 && e.title.length > 5 && !isNaN(Number(e.printed_page)))
+        .slice(0, 3);
+        
+      let foundOffset: number | null = null;
+
+      for (const candidate of candidates) {
+        const cleanTitle = candidate.title.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+        if (cleanTitle.length < 5) continue; 
+        
+        // Scan PDF pages after TOC where this entry might be
+        const startPdfPage = Math.max(lastTocPdfPage + 1, candidate.page);
+        const endPdfPage = Math.min(numPages, Math.max(startPdfPage + 20, candidate.page + 50));
+        
+        for (let p = startPdfPage; p <= endPdfPage; p++) {
+          const pdfPage = await pdf.getPage(p);
+          const textContent: any = await pdfPage.getTextContent();
+          const pageText = (textContent.items || []).map((it: any) => it.str || "").join("").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+          
+          if (pageText.includes(cleanTitle)) {
+            foundOffset = p - candidate.page;
+            break;
+          }
+        }
+        if (foundOffset !== null) break;
+      }
+
+      // Fallback: assume printed page 1 starts exactly after the last TOC page
+      if (foundOffset === null) {
+        const firstArabic = allEntries.find(e => e.page === 1);
+        if (firstArabic) {
+           foundOffset = lastTocPdfPage; // offset = lastTocPdfPage + 1(start) - 1(page number)
+        } 
+      }
+
+      if (foundOffset !== null && foundOffset !== 0) {
+        console.log(`Heuristically found global offset: ${foundOffset}`);
+        for (const entry of allEntries) {
+          if (entry.page > 0) {
+             entry.page = Math.max(1, Math.min(numPages, entry.page + foundOffset));
+          }
+        }
+        offsetApplied = true;
+      }
+    } catch (err) {
+      console.warn("Failed heuristic text offset alignment:", err);
     }
+  }
+
+  if (offsetApplied) {
+    onProgress?.({
+      status: "parsing",
+      message: `Successfully mapped pages using PDF logical labels.`,
+      totalEntries: allEntries.length,
+    });
   }
 
   const tocTree = buildTocTree(allEntries);

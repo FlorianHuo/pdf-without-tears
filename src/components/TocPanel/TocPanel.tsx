@@ -199,12 +199,14 @@ export default function TocPanel({
         {isGenerating ? (
           <div className={styles.aiProgressBar}>
             <div className={styles.aiSpinnerSmall} />
-            <span className={styles.aiProgressText}>{aiProgress?.message}</span>
+            <span className={`${styles.aiProgressText} ${styles.footerProgressText}`}>
+              {aiProgress?.message}
+            </span>
             {onAiCancel && (
               <button
-                className={styles.addButton}
+                className={styles.stopButton}
                 onClick={onAiCancel}
-                style={{ padding: '2px 8px', fontSize: '11px' }}
+                title="Cancel AI Generation"
               >
                 Stop
               </button>
